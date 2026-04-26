@@ -1,0 +1,31 @@
+services:
+  gpt-image:
+    image: raoczh/gpt-image:custom-20260426-01
+    container_name: gpt-image
+    environment:
+      API_URL: ${API_URL:-https://api.openai.com}
+      API_KEY: ${API_KEY:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - /www/wwwroot/gpt-image/files:/data/files
+    ports:
+      - "127.0.0.1:3003:80"
+    restart: always
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:3003/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    labels:
+      createdBy: "bt_apps"
+    networks:
+      - baota_net
+
+networks:
+  baota_net:
+    external: true

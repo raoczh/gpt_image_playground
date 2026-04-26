@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { normalizeBaseUrl } from '../lib/api'
 import { useStore, exportData, importData, clearAllData } from '../store'
-import { DEFAULT_SETTINGS, type AppSettings } from '../types'
+import { DEFAULT_SETTINGS, type AppSettings, type ApiFormat } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
 export default function SettingsModal() {
@@ -104,6 +104,28 @@ export default function SettingsModal() {
               API 配置
             </h4>
             <div className="space-y-4">
+              <label className="block">
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">请求格式</span>
+                <select
+                  value={draft.apiFormat ?? 'imagen'}
+                  onChange={(e) => {
+                    const apiFormat = e.target.value as ApiFormat
+                    const nextDraft = { ...draft, apiFormat }
+                    setDraft(nextDraft)
+                    commitSettings(nextDraft)
+                  }}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                >
+                  <option value="imagen">Images API (imagen)</option>
+                  <option value="responses">Responses API</option>
+                </select>
+                {(draft.apiFormat ?? 'imagen') === 'responses' && (
+                  <div className="mt-1 text-[10px] text-amber-500 dark:text-amber-400">
+                    将使用 /v1/responses 端点，模型需填写支持图片生成工具的模型（如 gpt-4.1-mini）
+                  </div>
+                )}
+              </label>
+
               <label className="block">
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">API URL</span>
                 <input

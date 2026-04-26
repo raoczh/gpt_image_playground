@@ -1,19 +1,25 @@
 // ===== 设置 =====
 
+export type ApiFormat = 'imagen' | 'responses'
+
 export interface AppSettings {
   baseUrl: string
   apiKey: string
   model: string
   timeout: number
+  apiFormat: ApiFormat
 }
 
-const DEFAULT_BASE_URL = import.meta.env.VITE_DEFAULT_API_URL?.trim() || 'https://api.openai.com'
+const DEFAULT_BASE_URL = import.meta.env.VITE_DEFAULT_API_URL?.trim() || 'https://anyrouter.top'
+
+export const MASKED_KEY = '******'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: DEFAULT_BASE_URL,
-  apiKey: '',
-  model: 'gpt-image-2',
+  apiKey: MASKED_KEY,
+  model: 'gpt-5.3-codex',
   timeout: 300,
+  apiFormat: 'responses',
 }
 
 // ===== 任务参数 =====
@@ -98,6 +104,17 @@ export interface ImageResponseItem {
 
 export interface ImageApiResponse {
   data: ImageResponseItem[]
+}
+
+// ===== Responses API 响应 =====
+
+export interface ResponsesApiOutput {
+  type: string
+  result?: string
+}
+
+export interface ResponsesApiResponse {
+  output: ResponsesApiOutput[]
 }
 
 // ===== 导出数据 =====
