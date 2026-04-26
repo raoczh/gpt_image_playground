@@ -1,6 +1,6 @@
 services:
   gpt-image:
-    image: raoczh/gpt-image:custom-20260426-04
+    image: your-registry/gpt-image:latest
     container_name: gpt-image
     restart: always
     environment:
@@ -16,15 +16,19 @@ services:
       # GitHub OAuth 配置
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
-      GITHUB_CALLBACK_URL: https://gpt-image.raoczh.xyz/api/auth/github/callback
-      # Session 密钥
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL}
+      # Session 配置
       SESSION_SECRET: ${SESSION_SECRET}
-      APP_ORIGIN: https://gpt-image.raoczh.xyz
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-gpt_image_sid_v2}
+      SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      APP_ORIGIN: ${APP_ORIGIN}
       # 图片配置
-      IMAGE_BASE_URL: https://image.raoczh.xyz/images
+      IMAGE_BASE_URL: ${IMAGE_BASE_URL}
+      IMAGE_UPLOAD_DIR: /data/images
       # 默认 API 配置
-      DEFAULT_API_URL: ${DEFAULT_API_URL}
-      DEFAULT_API_KEY: ${DEFAULT_API_KEY}
+      DEFAULT_API_URL: ${DEFAULT_API_URL:-}
+      DEFAULT_API_KEY: ${DEFAULT_API_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-5.3-codex}
       DEFAULT_TIMEOUT: ${DEFAULT_TIMEOUT:-300}
       DEFAULT_API_FORMAT: ${DEFAULT_API_FORMAT:-responses}
@@ -38,7 +42,7 @@ services:
     depends_on:
       - redis
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/health || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 15s

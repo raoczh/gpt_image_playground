@@ -71,7 +71,7 @@ function saveSession(req) {
 }
 
 function redirectWithError(res, error) {
-  const location = new URL('/login', process.env.APP_ORIGIN || 'https://gpt-image.raoczh.xyz');
+  const location = new URL('/login', process.env.APP_ORIGIN || 'http://localhost:5173');
   location.searchParams.set('error', error);
   res.redirect(location.toString());
 }
@@ -334,7 +334,7 @@ app.set('trust proxy', 1);
 
 // 中间件
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://gpt-image.raoczh.xyz',
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -470,7 +470,7 @@ app.get('/api/auth/github/callback', async (req, res) => {
     req.session.username = githubUser.login;
 
     await saveSession(req);
-    res.redirect('/');
+    res.redirect(process.env.APP_ORIGIN || 'http://localhost:5173');
   } catch (error) {
     console.error('GitHub OAuth error:', error);
     redirectWithError(res, 'auth_failed');
@@ -755,6 +755,8 @@ app.get('/api/images/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+app.use('/images', express.static(process.env.IMAGE_UPLOAD_DIR || '/data/images'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });

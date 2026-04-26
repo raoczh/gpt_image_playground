@@ -20,36 +20,37 @@ export default function SettingsModal() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (showSettings) {
-      setDraft(settings)
-      setTimeoutInput(String(settings.timeout))
+    if (!showSettings) return
 
-      // 如果用户已登录，从后端加载设置
-      if (user) {
-        setLoading(true)
-        backendApi.getSettings()
-          .then((backendSettings) => {
-            setUseDefault(backendSettings.use_default)
-            const mergedSettings = {
-              ...settings,
-              baseUrl: backendSettings.api_url || '',
-              apiKey: backendSettings.api_key || '',
-              model: backendSettings.settings?.model || settings.model,
-              timeout: backendSettings.settings?.timeout || settings.timeout,
-              apiFormat: backendSettings.settings?.apiFormat || settings.apiFormat,
-            }
-            setDraft(mergedSettings)
-            setSettings(mergedSettings)
-          })
-          .catch((error) => {
-            console.error('Failed to load settings:', error)
-          })
-          .finally(() => {
-            setLoading(false)
-          })
-      }
+    const currentSettings = useStore.getState().settings
+    setDraft(currentSettings)
+    setTimeoutInput(String(currentSettings.timeout))
+
+    if (user) {
+      setLoading(true)
+      backendApi.getSettings()
+        .then((backendSettings) => {
+          setUseDefault(backendSettings.use_default)
+          const mergedSettings = {
+            ...currentSettings,
+            baseUrl: backendSettings.api_url || '',
+            apiKey: backendSettings.api_key || '',
+            model: backendSettings.settings?.model || currentSettings.model,
+            timeout: backendSettings.settings?.timeout || currentSettings.timeout,
+            apiFormat: backendSettings.settings?.apiFormat || currentSettings.apiFormat,
+          }
+          setDraft(mergedSettings)
+          setTimeoutInput(String(mergedSettings.timeout))
+          setSettings(mergedSettings)
+        })
+        .catch((error) => {
+          console.error('Failed to load settings:', error)
+        })
+        .finally(() => {
+          setLoading(false)
+        })
     }
-  }, [showSettings, settings, user, setSettings])
+  }, [showSettings, user, setSettings])
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedDraft = {

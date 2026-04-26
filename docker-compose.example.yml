@@ -1,6 +1,6 @@
 services:
   gpt-image:
-    image: raoczh/gpt-image:custom-20260426-01
+    image: your-registry/gpt-image:latest
     container_name: gpt-image
     environment:
       API_URL: ${API_URL:-https://api.openai.com}

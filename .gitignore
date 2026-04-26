@@ -10,6 +10,12 @@ deploy/.env
 server/.env
 server/node_modules/
 
+# 本地构建备忘
+编译构建
+
+# Claude Code
+.claude/
+
 # 数据库备份
 *.sql.backup
 backup_*.sql
