@@ -525,9 +525,13 @@ app.get('/api/settings', requireAuth, async (req, res) => {
     );
 
     const settings = resolveApiSettings(rows[0]);
+
+    // 不返回完整的 API Key，只返回掩码
+    const maskedApiKey = settings.apiKey ? '••••••••••••••••' : '';
+
     res.json({
       api_url: settings.baseUrl,
-      api_key: settings.apiKey,
+      api_key: maskedApiKey,
       use_default: !rows[0]?.api_url && !rows[0]?.api_key,
       settings: {
         model: settings.model,
@@ -548,12 +552,22 @@ app.post('/api/settings', requireAuth, async (req, res) => {
     const finalApiUrl = use_default ? null : api_url;
     const finalApiKey = use_default ? null : api_key;
 
-    await db.query(
-      `INSERT INTO user_settings (user_id, api_url, api_key, settings)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE api_url = ?, api_key = ?, settings = ?, updated_at = NOW()`,
-      [req.session.userId, finalApiUrl, finalApiKey, JSON.stringify(settings), finalApiUrl, finalApiKey, JSON.stringify(settings)]
-    );
+    // 如果 api_key 未提供（undefined），则不更新它
+    if (api_key === undefined) {
+      await db.query(
+        `INSERT INTO user_settings (user_id, api_url, settings)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE api_url = ?, settings = ?, updated_at = NOW()`,
+        [req.session.userId, finalApiUrl, JSON.stringify(settings), finalApiUrl, JSON.stringify(settings)]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO user_settings (user_id, api_url, api_key, settings)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE api_url = ?, api_key = ?, settings = ?, updated_at = NOW()`,
+        [req.session.userId, finalApiUrl, finalApiKey, JSON.stringify(settings), finalApiUrl, finalApiKey, JSON.stringify(settings)]
+      );
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -567,7 +581,7 @@ app.post('/api/settings', requireAuth, async (req, res) => {
 app.get('/api/tasks', requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT * FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000',
+      'SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1000',
       [req.session.userId]
     );
 
@@ -623,7 +637,7 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     await db.query(
-      'DELETE FROM tasks WHERE id = ? AND user_id = ?',
+      'UPDATE tasks SET deleted_at = NOW() WHERE id = ? AND user_id = ?',
       [id, req.session.userId]
     );
 
@@ -636,7 +650,7 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/tasks', requireAuth, async (req, res) => {
   try {
-    await db.query('DELETE FROM tasks WHERE user_id = ?', [req.session.userId]);
+    await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [req.session.userId]);
     res.json({ success: true });
   } catch (error) {
     console.error('Clear tasks error:', error);

@@ -191,9 +191,34 @@ function genId(): string {
   return Date.now().toString(36) + (++uid).toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
-/** 初始化：从 IndexedDB 加载任务和图片缓存，清理孤立图片 */
+/** 初始化：从后端或 IndexedDB 加载任务和图片缓存，清理孤立图片 */
 export async function initStore() {
-  const tasks = await getAllTasks()
+  const { user } = useStore.getState()
+
+  let tasks: TaskRecord[] = []
+
+  // 如果用户已登录，从后端加载任务
+  if (user) {
+    try {
+      const backendTasks = await backendApi.getTasks()
+      // 转换后端任务格式为前端格式
+      tasks = backendTasks.map((t): TaskRecord => ({
+        id: t.id,
+        prompt: t.prompt,
+        params: t.params as TaskParams,
+        inputImageIds: t.input_image_ids || [],
+        outputImages: t.output_image_ids || [],
+        status: t.status,
+        error: t.error_message || null,
+        createdAt: t.started_at,
+        finishedAt: t.finished_at || null,
+        elapsed: t.finished_at ? t.finished_at - t.started_at : null,
+      }))
+    } catch (error) {
+      console.error('Failed to load tasks from backend:', error)
+    }
+  }
+
   useStore.getState().setTasks(tasks)
 
   // 收集所有任务引用的图片 id
@@ -260,7 +285,6 @@ export async function submitTask() {
 
   const newTasks = [task, ...tasks]
   setTasks(newTasks)
-  await putTask(task)
 
   // 如果用户已登录，同步到后端
   if (user) {
@@ -378,8 +402,6 @@ function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
     t.id === taskId ? { ...t, ...patch } : t,
   )
   setTasks(updated)
-  const task = updated.find((t) => t.id === taskId)
-  if (task) putTask(task)
 }
 
 /** 复用配置 */
@@ -419,7 +441,18 @@ export async function editOutputs(task: TaskRecord) {
 
 /** 删除单条任务 */
 export async function removeTask(task: TaskRecord) {
-  const { tasks, setTasks, inputImages, showToast } = useStore.getState()
+  const { user, tasks, setTasks, inputImages, showToast } = useStore.getState()
+
+  // 如果用户已登录，从后端删除
+  if (user) {
+    try {
+      await backendApi.deleteTask(task.id)
+    } catch (error) {
+      console.error('Failed to delete task from backend:', error)
+      showToast('删除失败', 'error')
+      return
+    }
+  }
 
   // 收集此任务关联的图片
   const taskImageIds = new Set([
@@ -430,7 +463,6 @@ export async function removeTask(task: TaskRecord) {
   // 从列表移除
   const remaining = tasks.filter((t) => t.id !== task.id)
   setTasks(remaining)
-  await dbDeleteTask(task.id)
 
   // 找出其他任务仍引用的图片
   const stillUsed = new Set<string>()
@@ -453,10 +485,21 @@ export async function removeTask(task: TaskRecord) {
 
 /** 清空所有数据（含配置重置） */
 export async function clearAllData() {
-  await dbClearTasks()
+  const { user, setTasks, clearInputImages, setSettings, setParams, showToast } = useStore.getState()
+
+  // 如果用户已登录，从后端清空
+  if (user) {
+    try {
+      await backendApi.clearTasks()
+    } catch (error) {
+      console.error('Failed to clear tasks from backend:', error)
+      showToast('清空失败', 'error')
+      return
+    }
+  }
+
   await clearImages()
   imageCache.clear()
-  const { setTasks, clearInputImages, setSettings, setParams, showToast } = useStore.getState()
   setTasks([])
   clearInputImages()
   setSettings({ ...DEFAULT_SETTINGS })

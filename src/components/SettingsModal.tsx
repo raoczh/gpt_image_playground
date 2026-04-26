@@ -18,6 +18,7 @@ export default function SettingsModal() {
   const [showApiKey, setShowApiKey] = useState(false)
   const [useDefault, setUseDefault] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [apiKeyChanged, setApiKeyChanged] = useState(false) // 追踪 API Key 是否被修改
 
   useEffect(() => {
     if (!showSettings) return
@@ -34,7 +35,7 @@ export default function SettingsModal() {
           const mergedSettings = {
             ...currentSettings,
             baseUrl: backendSettings.api_url || '',
-            apiKey: backendSettings.api_key || '',
+            apiKey: backendSettings.api_key || '', // 这里是掩码
             model: backendSettings.settings?.model || currentSettings.model,
             timeout: backendSettings.settings?.timeout || currentSettings.timeout,
             apiFormat: backendSettings.settings?.apiFormat || currentSettings.apiFormat,
@@ -42,6 +43,7 @@ export default function SettingsModal() {
           setDraft(mergedSettings)
           setTimeoutInput(String(mergedSettings.timeout))
           setSettings(mergedSettings)
+          setApiKeyChanged(false) // 重置修改标记
         })
         .catch((error) => {
           console.error('Failed to load settings:', error)
@@ -77,16 +79,25 @@ export default function SettingsModal() {
 
     // 如果用户已登录，保存到后端
     if (user) {
-      backendApi.updateSettings({
-        api_url: useDefault ? undefined : finalSettings.baseUrl,
-        api_key: useDefault ? undefined : finalSettings.apiKey,
+      const updatePayload: any = {
         use_default: useDefault,
         settings: {
           model: finalSettings.model,
           timeout: finalSettings.timeout,
           apiFormat: finalSettings.apiFormat,
         },
-      }).catch((error) => {
+      }
+
+      // 只有在不使用默认配置时才发送 URL 和 Key
+      if (!useDefault) {
+        updatePayload.api_url = finalSettings.baseUrl
+        // 只有在 API Key 被修改过时才发送
+        if (apiKeyChanged) {
+          updatePayload.api_key = finalSettings.apiKey
+        }
+      }
+
+      backendApi.updateSettings(updatePayload).catch((error) => {
         console.error('Failed to save settings:', error)
       })
     }
@@ -213,8 +224,11 @@ export default function SettingsModal() {
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</span>
                 <div className="relative">
                   <input
-                    value={draft.apiKey}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, apiKey: e.target.value }))}
+                    value={useDefault ? '••••••••••••••••' : draft.apiKey}
+                    onChange={(e) => {
+                      setDraft((prev) => ({ ...prev, apiKey: e.target.value }))
+                      setApiKeyChanged(true) // 标记为已修改
+                    }}
                     onBlur={(e) => commitSettings({ ...draft, apiKey: e.target.value })}
                     type={showApiKey ? 'text' : 'password'}
                     placeholder="sk-..."
