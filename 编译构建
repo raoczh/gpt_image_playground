@@ -1,4 +1,4 @@
 编译：
-docker buildx build --platform linux/amd64 -t raoczh/gpt-image:custom-20260426-03 --load .
+docker buildx build --platform linux/amd64 -t raoczh/gpt-image:custom-20260426-09 --load .
 推送：
-docker push raoczh/gpt-image:custom-20260426-03
+docker push raoczh/gpt-image:custom-20260426-09

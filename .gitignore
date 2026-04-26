@@ -2,3 +2,41 @@ node_modules/
 dist/
 dev-proxy.config.json
 .env
+
+# 服务器环境变量和敏感信息
+.env.local
+.env.production
+deploy/.env
+server/.env
+server/node_modules/
+
+# 数据库备份
+*.sql.backup
+backup_*.sql
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 日志
+*.log
+
+# 本地数据
+/www/
+*.db
+*.sqlite
+
+# 测试覆盖率
+coverage/

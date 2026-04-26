@@ -24,6 +24,8 @@ import {
 import { callImageApi } from './lib/api'
 import { normalizeImageSize } from './lib/size'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
+import type { User } from './lib/backendApi'
+import * as backendApi from './lib/backendApi'
 
 // ===== Image cache =====
 // 内存缓存，id → dataUrl，避免每次从 IndexedDB 读取
@@ -47,6 +49,12 @@ export async function ensureImageCached(id: string): Promise<string | undefined>
 // ===== Store 类型 =====
 
 interface AppState {
+  // 用户认证
+  user: User | null
+  authLoading: boolean
+  setUser: (u: User | null) => void
+  setAuthLoading: (v: boolean) => void
+
   // 设置
   settings: AppSettings
   setSettings: (s: Partial<AppSettings>) => void
@@ -99,6 +107,12 @@ interface AppState {
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
+      // User
+      user: null,
+      authLoading: true,
+      setUser: (user) => set({ user }),
+      setAuthLoading: (authLoading) => set({ authLoading }),
+
       // Settings
       settings: { ...DEFAULT_SETTINGS },
       setSettings: (s) => set((st) => ({ settings: { ...st.settings, ...s } })),
@@ -202,11 +216,12 @@ export async function initStore() {
 
 /** 提交新任务 */
 export async function submitTask() {
-  const { settings, prompt, inputImages, params, tasks, setTasks, showToast } =
+  const { user, settings, prompt, inputImages, params, tasks, setTasks, showToast } =
     useStore.getState()
 
-  if (!settings.apiKey) {
-    showToast('请先在设置中配置 API Key', 'error')
+  const hasApiAccess = Boolean(settings.apiKey || user)
+  if (!hasApiAccess) {
+    showToast('请先登录并使用默认配置，或在设置中配置 API Key', 'error')
     useStore.getState().setShowSettings(true)
     return
   }
@@ -246,6 +261,21 @@ export async function submitTask() {
   const newTasks = [task, ...tasks]
   setTasks(newTasks)
   await putTask(task)
+
+  // 如果用户已登录，同步到后端
+  if (user) {
+    try {
+      await backendApi.createTask({
+        id: taskId,
+        prompt: task.prompt,
+        params: normalizedParams,
+        input_image_ids: task.inputImageIds,
+        started_at: task.createdAt,
+      })
+    } catch (error) {
+      console.error('Failed to sync task to backend:', error)
+    }
+  }
 
   // 异步调用 API
   executeTask(taskId)
@@ -287,6 +317,29 @@ async function executeTask(taskId: string) {
       elapsed: Date.now() - task.createdAt,
     })
 
+    // 如果用户已登录，同步到后端
+    const { user } = useStore.getState()
+    if (user) {
+      try {
+        await backendApi.updateTask(taskId, {
+          status: 'done',
+          output_image_ids: outputIds,
+          finished_at: Date.now(),
+        })
+
+        // 上传生成的图片到服务器
+        for (const dataUrl of result.images) {
+          try {
+            await backendApi.saveImage(dataUrl, 'generated')
+          } catch (error) {
+            console.error('Failed to upload image to backend:', error)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to sync task completion to backend:', error)
+      }
+    }
+
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
   } catch (err) {
     updateTaskInStore(taskId, {
@@ -295,6 +348,21 @@ async function executeTask(taskId: string) {
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
+
+    // 如果用户已登录，同步错误状态到后端
+    const { user } = useStore.getState()
+    if (user) {
+      try {
+        await backendApi.updateTask(taskId, {
+          status: 'error',
+          error_message: err instanceof Error ? err.message : String(err),
+          finished_at: Date.now(),
+        })
+      } catch (error) {
+        console.error('Failed to sync task error to backend:', error)
+      }
+    }
+
     useStore.getState().setDetailTaskId(taskId)
   }
 
@@ -526,6 +594,16 @@ export async function addImageFromFile(file: File): Promise<void> {
   const id = await hashDataUrl(dataUrl)
   imageCache.set(id, dataUrl)
   useStore.getState().addInputImage({ id, dataUrl })
+
+  // 如果用户已登录，上传到服务器
+  const { user } = useStore.getState()
+  if (user) {
+    try {
+      await backendApi.uploadImage(file)
+    } catch (error) {
+      console.error('Failed to upload image to backend:', error)
+    }
+  }
 }
 
 function fileToDataUrl(file: File): Promise<string> {

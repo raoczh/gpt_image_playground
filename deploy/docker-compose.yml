@@ -1,0 +1,70 @@
+services:
+  gpt-image:
+    image: raoczh/gpt-image:custom-20260426-04
+    container_name: gpt-image
+    restart: always
+    environment:
+      # 数据库配置
+      DB_HOST: ${DB_HOST:-172.18.0.1}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-gpt-image}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-gpt-image}
+      # Redis 配置
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # GitHub OAuth 配置
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_CALLBACK_URL: https://gpt-image.raoczh.xyz/api/auth/github/callback
+      # Session 密钥
+      SESSION_SECRET: ${SESSION_SECRET}
+      APP_ORIGIN: https://gpt-image.raoczh.xyz
+      # 图片配置
+      IMAGE_BASE_URL: https://image.raoczh.xyz/images
+      # 默认 API 配置
+      DEFAULT_API_URL: ${DEFAULT_API_URL}
+      DEFAULT_API_KEY: ${DEFAULT_API_KEY}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-5.3-codex}
+      DEFAULT_TIMEOUT: ${DEFAULT_TIMEOUT:-300}
+      DEFAULT_API_FORMAT: ${DEFAULT_API_FORMAT:-responses}
+      # 其他配置
+      TZ: Asia/Shanghai
+      NODE_ENV: production
+    volumes:
+      - /www/wwwroot/gpt-image/images:/data/images
+    ports:
+      - "127.0.0.1:3003:80"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    labels:
+      createdBy: "bt_apps"
+    networks:
+      - baota_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: gpt-image-redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - /www/wwwroot/gpt-image/redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      createdBy: "bt_apps"
+    networks:
+      - baota_net
+
+networks:
+  baota_net:
+    external: true

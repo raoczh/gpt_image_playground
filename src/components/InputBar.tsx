@@ -64,7 +64,7 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
-  const canSubmit = (prompt.trim() || inputImages.length) && settings.apiKey
+  const canSubmit = Boolean(prompt.trim() || inputImages.length) && (!!settings.apiKey || !!useStore.getState().user)
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
 
   useEffect(() => {
@@ -147,7 +147,7 @@ export default function InputBar() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
-      submitTask()
+      if (canSubmit) submitTask()
     }
   }
 

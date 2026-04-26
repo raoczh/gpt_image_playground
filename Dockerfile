@@ -1,26 +1,31 @@
-# Stage 1: Build
-FROM node:22-alpine AS builder
+# Stage 1: Build frontend
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /build
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY . .
-
-# 使用占位符构建，运行时替换
-ENV VITE_DEFAULT_API_URL=__API_URL_PLACEHOLDER__
-ENV VITE_DEFAULT_API_KEY=__API_KEY_PLACEHOLDER__
+COPY src ./src
+COPY public ./public
+COPY index.html tsconfig.json vite.config.ts postcss.config.js tailwind.config.js ./
 
 RUN npm run build
 
-# Stage 2: Runtime
-FROM nginx:alpine
+# Stage 2: Runtime with Node.js backend + frontend
+FROM node:22-alpine
 
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /build/dist /usr/share/nginx/html
-COPY deploy/docker-entrypoint.sh /docker-entrypoint.d/40-env-subst.sh
+ENV NODE_ENV=production
+WORKDIR /app
 
-RUN chmod +x /docker-entrypoint.d/40-env-subst.sh
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY server/ ./
+COPY --from=frontend-builder /build/dist ./public
+
+RUN mkdir -p /data/images
 
 EXPOSE 80
+
+CMD ["node", "server.js"]

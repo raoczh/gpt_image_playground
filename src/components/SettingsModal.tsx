@@ -3,8 +3,10 @@ import { normalizeBaseUrl } from '../lib/api'
 import { useStore, exportData, importData, clearAllData } from '../store'
 import { DEFAULT_SETTINGS, type AppSettings, type ApiFormat } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import * as backendApi from '../lib/backendApi'
 
 export default function SettingsModal() {
+  const user = useStore((s) => s.user)
   const showSettings = useStore((s) => s.showSettings)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const settings = useStore((s) => s.settings)
@@ -14,13 +16,40 @@ export default function SettingsModal() {
   const [draft, setDraft] = useState<AppSettings>(settings)
   const [timeoutInput, setTimeoutInput] = useState(String(settings.timeout))
   const [showApiKey, setShowApiKey] = useState(false)
+  const [useDefault, setUseDefault] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (showSettings) {
       setDraft(settings)
       setTimeoutInput(String(settings.timeout))
+
+      // 如果用户已登录，从后端加载设置
+      if (user) {
+        setLoading(true)
+        backendApi.getSettings()
+          .then((backendSettings) => {
+            setUseDefault(backendSettings.use_default)
+            const mergedSettings = {
+              ...settings,
+              baseUrl: backendSettings.api_url || '',
+              apiKey: backendSettings.api_key || '',
+              model: backendSettings.settings?.model || settings.model,
+              timeout: backendSettings.settings?.timeout || settings.timeout,
+              apiFormat: backendSettings.settings?.apiFormat || settings.apiFormat,
+            }
+            setDraft(mergedSettings)
+            setSettings(mergedSettings)
+          })
+          .catch((error) => {
+            console.error('Failed to load settings:', error)
+          })
+          .finally(() => {
+            setLoading(false)
+          })
+      }
     }
-  }, [showSettings, settings])
+  }, [showSettings, settings, user, setSettings])
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedDraft = {
@@ -36,13 +65,31 @@ export default function SettingsModal() {
 
   const handleClose = () => {
     const nextTimeout = Number(timeoutInput)
-    commitSettings({
+    const finalSettings = {
       ...draft,
       timeout:
         timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
           ? DEFAULT_SETTINGS.timeout
           : nextTimeout,
-    })
+    }
+    commitSettings(finalSettings)
+
+    // 如果用户已登录，保存到后端
+    if (user) {
+      backendApi.updateSettings({
+        api_url: useDefault ? undefined : finalSettings.baseUrl,
+        api_key: useDefault ? undefined : finalSettings.apiKey,
+        use_default: useDefault,
+        settings: {
+          model: finalSettings.model,
+          timeout: finalSettings.timeout,
+          apiFormat: finalSettings.apiFormat,
+        },
+      }).catch((error) => {
+        console.error('Failed to save settings:', error)
+      })
+    }
+
     setShowSettings(false)
   }
 
@@ -104,6 +151,24 @@ export default function SettingsModal() {
               API 配置
             </h4>
             <div className="space-y-4">
+              {user && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useDefault}
+                    onChange={(e) => setUseDefault(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500 dark:border-white/[0.08] dark:bg-white/[0.03]"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">使用默认配置</span>
+                  {loading && (
+                    <svg className="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                </label>
+              )}
+
               <label className="block">
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">请求格式</span>
                 <select
@@ -114,7 +179,8 @@ export default function SettingsModal() {
                     setDraft(nextDraft)
                     commitSettings(nextDraft)
                   }}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  disabled={useDefault}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="imagen">Images API (imagen)</option>
                   <option value="responses">Responses API</option>
@@ -134,10 +200,11 @@ export default function SettingsModal() {
                   onBlur={(e) => commitSettings({ ...draft, baseUrl: e.target.value })}
                   type="text"
                   placeholder={DEFAULT_SETTINGS.baseUrl}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  disabled={useDefault}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
+                  {useDefault ? '使用服务器配置的默认 API URL' : '支持通过查询参数覆盖：'}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
                 </div>
               </label>
 
@@ -150,12 +217,14 @@ export default function SettingsModal() {
                     onBlur={(e) => commitSettings({ ...draft, apiKey: e.target.value })}
                     type={showApiKey ? 'text' : 'password'}
                     placeholder="sk-..."
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                    disabled={useDefault}
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                   <button
                     type="button"
                     onClick={() => setShowApiKey((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    disabled={useDefault}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     tabIndex={-1}
                   >
                     {showApiKey ? (
@@ -174,7 +243,7 @@ export default function SettingsModal() {
                   </button>
                 </div>
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
+                  {useDefault ? '使用服务器配置的默认 API Key' : '支持通过查询参数覆盖：'}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
                 </div>
               </div>
 
@@ -186,7 +255,8 @@ export default function SettingsModal() {
                   onBlur={(e) => commitSettings({ ...draft, model: e.target.value })}
                   type="text"
                   placeholder="gpt-image-2"
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  disabled={useDefault}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </label>
 

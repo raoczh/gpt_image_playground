@@ -10,13 +10,13 @@ export interface AppSettings {
   apiFormat: ApiFormat
 }
 
-const DEFAULT_BASE_URL = import.meta.env.VITE_DEFAULT_API_URL?.trim() || 'https://anyrouter.top'
+const DEFAULT_BASE_URL = ''
 
 export const MASKED_KEY = '******'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: DEFAULT_BASE_URL,
-  apiKey: MASKED_KEY,
+  apiKey: '',
   model: 'gpt-5.3-codex',
   timeout: 300,
   apiFormat: 'responses',
