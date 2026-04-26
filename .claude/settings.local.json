@@ -12,7 +12,8 @@
       "Bash(node --check \"d:/workspace/gpt_image_playground/server/server.js\")",
       "Bash(python -)",
       "Bash(docker buildx *)",
-      "Bash(docker image *)"
+      "Bash(docker image *)",
+      "Bash(grep -E \"\\\\.\\(go|js|sql\\)$\")"
     ]
   }
 }

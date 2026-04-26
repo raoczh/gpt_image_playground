@@ -62,6 +62,23 @@ async function initDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务记录表'
     `);
 
+    // 检查并添加 deleted_at 字段（自动迁移）
+    const [columns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'deleted_at'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (columns.length === 0) {
+      console.log('  📝 Adding deleted_at column to tasks table...');
+      await connection.query(`
+        ALTER TABLE tasks
+        ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER finished_at,
+        ADD INDEX idx_deleted_at (deleted_at)
+      `);
+      console.log('  ✅ Added deleted_at column');
+    }
+
     // 创建图片表
     await connection.query(`
       CREATE TABLE IF NOT EXISTS images (
