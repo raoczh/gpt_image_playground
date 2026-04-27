@@ -99,6 +99,23 @@ async function initDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片表'
     `);
 
+    // 检查并添加 images 表的 deleted_at 字段
+    const [imageColumns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'images' AND COLUMN_NAME = 'deleted_at'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (imageColumns.length === 0) {
+      console.log('  📝 Adding deleted_at column to images table...');
+      await connection.query(`
+        ALTER TABLE images
+        ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER height,
+        ADD INDEX idx_deleted_at (deleted_at)
+      `);
+      console.log('  ✅ Added deleted_at column to images');
+    }
+
     // 创建用户设置表
     await connection.query(`
       CREATE TABLE IF NOT EXISTS user_settings (

@@ -585,11 +585,32 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       [req.session.userId]
     );
 
-    const tasks = rows.map(task => ({
-      ...task,
-      params: typeof task.params === 'string' ? JSON.parse(task.params) : task.params,
-      input_image_ids: typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids,
-      output_image_ids: typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids
+    const tasks = await Promise.all(rows.map(async task => {
+      const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
+      const inputImageIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids;
+
+      // 查询输出图片的 URL
+      const outputImageUrls = [];
+      if (outputImageIds && outputImageIds.length > 0) {
+        const [images] = await db.query(
+          'SELECT id, file_url FROM images WHERE id IN (?) AND user_id = ?',
+          [outputImageIds, req.session.userId]
+        );
+        const imageMap = new Map(images.map(img => [img.id, img.file_url]));
+        for (const id of outputImageIds) {
+          if (imageMap.has(id)) {
+            outputImageUrls.push(imageMap.get(id));
+          }
+        }
+      }
+
+      return {
+        ...task,
+        params: typeof task.params === 'string' ? JSON.parse(task.params) : task.params,
+        input_image_ids: inputImageIds || [],
+        output_image_ids: outputImageIds || [],
+        output_image_urls: outputImageUrls,
+      };
     }));
 
     res.json(tasks);

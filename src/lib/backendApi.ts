@@ -96,6 +96,7 @@ export interface Task {
   params: Record<string, any>;
   input_image_ids: string[];
   output_image_ids: string[];
+  output_image_urls: string[];
   started_at: number;
   finished_at?: number;
   created_at: string;

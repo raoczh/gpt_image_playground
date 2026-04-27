@@ -207,7 +207,7 @@ export async function initStore() {
         prompt: t.prompt,
         params: t.params as TaskParams,
         inputImageIds: t.input_image_ids || [],
-        outputImages: t.output_image_ids || [],
+        outputImages: t.output_image_urls || [],
         status: t.status,
         error: t.error_message || null,
         createdAt: t.started_at,

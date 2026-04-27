@@ -24,14 +24,8 @@ export default function Lightbox() {
       setSrc('')
       return
     }
-    const cached = getCachedImage(lightboxImageId)
-    if (cached) {
-      setSrc(cached)
-    } else {
-      ensureImageCached(lightboxImageId).then((url) => {
-        if (url) setSrc(url)
-      })
-    }
+    // lightboxImageId 现在是 URL，直接使用
+    setSrc(lightboxImageId)
   }, [lightboxImageId])
 
   // 导航

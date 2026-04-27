@@ -34,21 +34,15 @@ export default function DetailModal() {
   // 加载所有相关图片
   useEffect(() => {
     if (!task) return
-    const ids = [...(task.outputImages || []), ...(task.inputImageIds || [])]
-    for (const id of ids) {
-      const cached = getCachedImage(id)
-      if (cached) {
-        setImageSrcs((prev) => ({ ...prev, [id]: cached }))
-      } else {
-        ensureImageCached(id).then((url) => {
-          if (url) setImageSrcs((prev) => ({ ...prev, [id]: url }))
-        })
-      }
+    const newSrcs: Record<string, string> = {}
+    for (const url of task.outputImages || []) {
+      newSrcs[url] = url
     }
+    setImageSrcs(newSrcs)
   }, [task])
 
   const currentOutputImageId = task?.outputImages?.[imageIndex] || ''
-  const currentOutputImageSrc = currentOutputImageId ? imageSrcs[currentOutputImageId] || '' : ''
+  const currentOutputImageSrc = currentOutputImageId
 
   useEffect(() => {
     if (!currentOutputImageId || !currentOutputImageSrc) return

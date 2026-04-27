@@ -32,18 +32,12 @@ export default function TaskCard({
 
   // 加载缩略图
   useEffect(() => {
+    setThumbSrc('')
     setCoverRatio('')
     setCoverSize('')
 
     if (task.outputImages?.[0]) {
-      const cached = getCachedImage(task.outputImages[0])
-      if (cached) {
-        setThumbSrc(cached)
-      } else {
-        ensureImageCached(task.outputImages[0]).then((url) => {
-          if (url) setThumbSrc(url)
-        })
-      }
+      setThumbSrc(task.outputImages[0])
     }
   }, [task.outputImages])
 
