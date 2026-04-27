@@ -85,7 +85,7 @@ function resolveApiSettings(userSettingsRow) {
     baseUrl: userSettingsRow?.api_url || process.env.DEFAULT_API_URL || '',
     apiKey: userSettingsRow?.api_key || process.env.DEFAULT_API_KEY || '',
     model: storedSettings.model || process.env.DEFAULT_MODEL || 'gpt-5.3-codex',
-    timeout: Number(storedSettings.timeout || process.env.DEFAULT_TIMEOUT || 300),
+    timeout: Number(storedSettings.timeout || process.env.DEFAULT_TIMEOUT || 600),
     apiFormat: storedSettings.apiFormat || process.env.DEFAULT_API_FORMAT || 'responses',
   };
 }
@@ -162,7 +162,7 @@ async function callUpstreamImageApi(userId, payload) {
   const { prompt, params, inputImageDataUrls } = payload;
   const isEdit = Array.isArray(inputImageDataUrls) && inputImageDataUrls.length > 0;
   const mime = MIME_MAP[params.output_format] || 'image/png';
-  const timeout = Math.max(Number(apiSettings.timeout) || 300, 10) * 1000;
+  const timeout = Math.max(Number(apiSettings.timeout) || 600, 10) * 1000;
   const signal = AbortSignal.timeout(timeout);
   const authHeaders = {
     Authorization: `Bearer ${apiSettings.apiKey}`,

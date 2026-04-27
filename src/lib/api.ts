@@ -15,6 +15,8 @@ export interface CallApiResult {
 }
 
 export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult> {
+  const timeoutMs = Math.max(Number(opts.settings.timeout) || 600, 10) * 1000
+  const signal = AbortSignal.timeout(timeoutMs)
   const response = await fetch(`${API_BASE_URL}/api/generate`, {
     method: 'POST',
     credentials: 'include',
@@ -25,6 +27,7 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       Pragma: 'no-cache',
     },
     body: JSON.stringify(opts),
+    signal,
   })
 
   if (!response.ok) {

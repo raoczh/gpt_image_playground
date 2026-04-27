@@ -18,7 +18,6 @@ import {
   putImage,
   deleteImage,
   clearImages,
-  storeImage,
   hashDataUrl,
 } from './lib/db'
 import { callImageApi } from './lib/api'
@@ -241,24 +240,17 @@ export async function initStore() {
 
 /** 提交新任务 */
 export async function submitTask() {
-  const { user, settings, prompt, inputImages, params, tasks, setTasks, showToast } =
+  const { user, prompt, inputImages, params, tasks, setTasks, showToast } =
     useStore.getState()
 
-  const hasApiAccess = Boolean(settings.apiKey || user)
-  if (!hasApiAccess) {
-    showToast('请先登录并使用默认配置，或在设置中配置 API Key', 'error')
-    useStore.getState().setShowSettings(true)
+  if (!user) {
+    backendApi.redirectToGitHubLogin()
     return
   }
 
   if (!prompt.trim() && !inputImages.length) {
     showToast('请输入提示词或添加参考图', 'error')
     return
-  }
-
-  // 持久化输入图片到 IndexedDB（此前只在内存缓存中）
-  for (const img of inputImages) {
-    await storeImage(img.dataUrl)
   }
 
   const normalizedParams = {
@@ -325,46 +317,37 @@ async function executeTask(taskId: string) {
       inputImageDataUrls: inputDataUrls,
     })
 
-    // 存储输出图片
+    // 先上传图片到后端获取 URL，再用 URL 更新任务
     const outputIds: string[] = []
+    const outputImages: string[] = []
     for (const dataUrl of result.images) {
-      const imgId = await storeImage(dataUrl, 'generated')
-      imageCache.set(imgId, dataUrl)
-      outputIds.push(imgId)
+      try {
+        const saved = await backendApi.saveImage(dataUrl, 'generated')
+        outputIds.push(saved.id)
+        outputImages.push(saved.url)
+      } catch (error) {
+        console.error('Failed to upload image to backend:', error)
+      }
     }
 
-    // 更新任务
     updateTaskInStore(taskId, {
-      outputImages: outputIds,
+      outputImages,
       status: 'done',
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
 
-    // 如果用户已登录，同步到后端
-    const { user } = useStore.getState()
-    if (user) {
-      try {
-        await backendApi.updateTask(taskId, {
-          status: 'done',
-          output_image_ids: outputIds,
-          finished_at: Date.now(),
-        })
-
-        // 上传生成的图片到服务器
-        for (const dataUrl of result.images) {
-          try {
-            await backendApi.saveImage(dataUrl, 'generated')
-          } catch (error) {
-            console.error('Failed to upload image to backend:', error)
-          }
-        }
-      } catch (error) {
-        console.error('Failed to sync task completion to backend:', error)
-      }
+    try {
+      await backendApi.updateTask(taskId, {
+        status: 'done',
+        output_image_ids: outputIds,
+        finished_at: Date.now(),
+      })
+    } catch (error) {
+      console.error('Failed to sync task completion to backend:', error)
     }
 
-    useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
+    useStore.getState().showToast(`生成完成，共 ${outputImages.length} 张图片`, 'success')
   } catch (err) {
     updateTaskInStore(taskId, {
       status: 'error',
@@ -422,19 +405,37 @@ export async function reuseConfig(task: TaskRecord) {
   showToast('已复用配置到输入框', 'success')
 }
 
+/** 将图片标识（URL / data URL）解析为 data URL */
+async function resolveImageToDataUrl(img: string): Promise<string | undefined> {
+  if (img.startsWith('data:')) return img
+  try {
+    const response = await fetch(img, { credentials: 'include' })
+    const blob = await response.blob()
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return undefined
+  }
+}
+
 /** 编辑输出：将输出图加入输入 */
 export async function editOutputs(task: TaskRecord) {
   const { inputImages, addInputImage, showToast } = useStore.getState()
   if (!task.outputImages?.length) return
 
   let added = 0
-  for (const imgId of task.outputImages) {
-    if (inputImages.find((i) => i.id === imgId)) continue
-    const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) {
-      addInputImage({ id: imgId, dataUrl })
-      added++
-    }
+  for (const img of task.outputImages) {
+    const dataUrl = await resolveImageToDataUrl(img)
+    if (!dataUrl) continue
+    const id = await hashDataUrl(dataUrl)
+    if (inputImages.find((i) => i.id === id)) continue
+    imageCache.set(id, dataUrl)
+    addInputImage({ id, dataUrl })
+    added++
   }
   showToast(`已添加 ${added} 张输出图到输入`, 'success')
 }

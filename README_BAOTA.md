@@ -72,7 +72,7 @@ services:
       DEFAULT_API_URL: ${DEFAULT_API_URL:-}
       DEFAULT_API_KEY: ${DEFAULT_API_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-5.3-codex}
-      DEFAULT_TIMEOUT: ${DEFAULT_TIMEOUT:-300}
+      DEFAULT_TIMEOUT: ${DEFAULT_TIMEOUT:-600}
       DEFAULT_API_FORMAT: ${DEFAULT_API_FORMAT:-responses}
       TZ: Asia/Shanghai
       NODE_ENV: production
@@ -141,7 +141,7 @@ VITE_API_BASE_URL=https://api.你的页面域名
 DEFAULT_API_URL=https://api.openai.com/v1
 DEFAULT_API_KEY=你的默认API密钥
 DEFAULT_MODEL=gpt-5.3-codex
-DEFAULT_TIMEOUT=300
+DEFAULT_TIMEOUT=600
 DEFAULT_API_FORMAT=responses
 ```
 

@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: DEFAULT_BASE_URL,
   apiKey: '',
   model: 'gpt-5.3-codex',
-  timeout: 300,
+  timeout: 600,
   apiFormat: 'responses',
 }
 
