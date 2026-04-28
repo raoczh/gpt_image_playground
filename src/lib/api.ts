@@ -1,10 +1,9 @@
-import type { AppSettings, TaskParams } from '../types'
+import type { TaskParams } from '../types'
 export { normalizeBaseUrl } from './devProxy'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 export interface CallApiOptions {
-  settings: AppSettings
   prompt: string
   params: TaskParams
   inputImageDataUrls: string[]
@@ -15,7 +14,7 @@ export interface CallApiResult {
 }
 
 export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult> {
-  const timeoutMs = Math.max(Number(opts.settings.timeout) || 600, 10) * 1000
+  const timeoutMs = 600 * 1000
   const signal = AbortSignal.timeout(timeoutMs)
   const response = await fetch(`${API_BASE_URL}/api/generate`, {
     method: 'POST',

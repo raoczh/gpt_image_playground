@@ -95,6 +95,11 @@ export default function App() {
     getCurrentUser()
       .then((user) => {
         setUser(user)
+        // 用户登录成功后清空浏览器存储
+        if (user) {
+          localStorage.clear()
+          sessionStorage.clear()
+        }
       })
       .catch((error) => {
         console.error('Failed to get current user:', error)

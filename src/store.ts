@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
   TaskParams,
@@ -103,85 +102,74 @@ interface AppState {
   setConfirmDialog: (d: AppState['confirmDialog']) => void
 }
 
-export const useStore = create<AppState>()(
-  persist(
-    (set, get) => ({
-      // User
-      user: null,
-      authLoading: true,
-      setUser: (user) => set({ user }),
-      setAuthLoading: (authLoading) => set({ authLoading }),
+export const useStore = create<AppState>()((set) => ({
+  // User
+  user: null,
+  authLoading: true,
+  setUser: (user) => set({ user }),
+  setAuthLoading: (authLoading) => set({ authLoading }),
 
-      // Settings
-      settings: { ...DEFAULT_SETTINGS },
-      setSettings: (s) => set((st) => ({ settings: { ...st.settings, ...s } })),
+  // Settings
+  settings: { ...DEFAULT_SETTINGS },
+  setSettings: (s) => set((st) => ({ settings: { ...st.settings, ...s } })),
 
-      // Input
-      prompt: '',
-      setPrompt: (prompt) => set({ prompt }),
-      inputImages: [],
-      addInputImage: (img) =>
-        set((s) => {
-          if (s.inputImages.find((i) => i.id === img.id)) return s
-          return { inputImages: [...s.inputImages, img] }
-        }),
-      removeInputImage: (idx) =>
-        set((s) => ({
-          inputImages: s.inputImages.filter((_, i) => i !== idx),
-        })),
-      clearInputImages: () =>
-        set((s) => {
-          for (const img of s.inputImages) imageCache.delete(img.id)
-          return { inputImages: [] }
-        }),
-      setInputImages: (imgs) => set({ inputImages: imgs }),
-
-      // Params
-      params: { ...DEFAULT_PARAMS },
-      setParams: (p) => set((s) => ({ params: { ...s.params, ...p } })),
-
-      // Tasks
-      tasks: [],
-      setTasks: (tasks) => set({ tasks }),
-
-      // Search & Filter
-      searchQuery: '',
-      setSearchQuery: (searchQuery) => set({ searchQuery }),
-      filterStatus: 'all',
-      setFilterStatus: (filterStatus) => set({ filterStatus }),
-
-      // UI
-      detailTaskId: null,
-      setDetailTaskId: (detailTaskId) => set({ detailTaskId }),
-      lightboxImageId: null,
-      lightboxImageList: [],
-      setLightboxImageId: (lightboxImageId, list) =>
-        set({ lightboxImageId, lightboxImageList: list ?? (lightboxImageId ? [lightboxImageId] : []) }),
-      showSettings: false,
-      setShowSettings: (showSettings) => set({ showSettings }),
-
-      // Toast
-      toast: null,
-      showToast: (message, type = 'info') => {
-        set({ toast: { message, type } })
-        setTimeout(() => {
-          set((s) => (s.toast?.message === message ? { toast: null } : s))
-        }, 3000)
-      },
-
-      // Confirm
-      confirmDialog: null,
-      setConfirmDialog: (confirmDialog) => set({ confirmDialog }),
+  // Input
+  prompt: '',
+  setPrompt: (prompt) => set({ prompt }),
+  inputImages: [],
+  addInputImage: (img) =>
+    set((s) => {
+      if (s.inputImages.find((i) => i.id === img.id)) return s
+      return { inputImages: [...s.inputImages, img] }
     }),
-    {
-      name: 'gpt-image-playground',
-      partialize: (state) => ({
-        settings: state.settings,
-        params: state.params,
-      }),
-    },
-  ),
-)
+  removeInputImage: (idx) =>
+    set((s) => ({
+      inputImages: s.inputImages.filter((_, i) => i !== idx),
+    })),
+  clearInputImages: () =>
+    set((s) => {
+      for (const img of s.inputImages) imageCache.delete(img.id)
+      return { inputImages: [] }
+    }),
+  setInputImages: (imgs) => set({ inputImages: imgs }),
+
+  // Params
+  params: { ...DEFAULT_PARAMS },
+  setParams: (p) => set((s) => ({ params: { ...s.params, ...p } })),
+
+  // Tasks
+  tasks: [],
+  setTasks: (tasks) => set({ tasks }),
+
+  // Search & Filter
+  searchQuery: '',
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  filterStatus: 'all',
+  setFilterStatus: (filterStatus) => set({ filterStatus }),
+
+  // UI
+  detailTaskId: null,
+  setDetailTaskId: (detailTaskId) => set({ detailTaskId }),
+  lightboxImageId: null,
+  lightboxImageList: [],
+  setLightboxImageId: (lightboxImageId, list) =>
+    set({ lightboxImageId, lightboxImageList: list ?? (lightboxImageId ? [lightboxImageId] : []) }),
+  showSettings: false,
+  setShowSettings: (showSettings) => set({ showSettings }),
+
+  // Toast
+  toast: null,
+  showToast: (message, type = 'info') => {
+    set({ toast: { message, type } })
+    setTimeout(() => {
+      set((s) => (s.toast?.message === message ? { toast: null } : s))
+    }, 3000)
+  },
+
+  // Confirm
+  confirmDialog: null,
+  setConfirmDialog: (confirmDialog) => set({ confirmDialog }),
+}))
 
 // ===== Actions =====
 
@@ -240,7 +228,7 @@ export async function initStore() {
 
 /** 提交新任务 */
 export async function submitTask() {
-  const { user, prompt, inputImages, params, tasks, setTasks, showToast } =
+  const { user, prompt, inputImages, params, tasks, setTasks, showToast, setPrompt, clearInputImages } =
     useStore.getState()
 
   if (!user) {
@@ -261,6 +249,13 @@ export async function submitTask() {
     useStore.getState().setParams({ size: normalizedParams.size })
   }
 
+  // 在清空之前，先获取所有输入图片的 dataUrl
+  const inputImageDataUrls: string[] = []
+  for (const img of inputImages) {
+    const dataUrl = await ensureImageCached(img.id)
+    if (dataUrl) inputImageDataUrls.push(dataUrl)
+  }
+
   const taskId = genId()
   const task: TaskRecord = {
     id: taskId,
@@ -278,6 +273,10 @@ export async function submitTask() {
   const newTasks = [task, ...tasks]
   setTasks(newTasks)
 
+  // 清空输入框和图片
+  setPrompt('')
+  clearInputImages()
+
   // 如果用户已登录，同步到后端
   if (user) {
     try {
@@ -293,25 +292,16 @@ export async function submitTask() {
     }
   }
 
-  // 异步调用 API
-  executeTask(taskId)
+  // 异步调用 API，传入已获取的 dataUrls
+  executeTask(taskId, inputImageDataUrls)
 }
 
-async function executeTask(taskId: string) {
-  const { settings } = useStore.getState()
+async function executeTask(taskId: string, inputDataUrls: string[]) {
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
 
   try {
-    // 获取输入图片 data URLs
-    const inputDataUrls: string[] = []
-    for (const imgId of task.inputImageIds) {
-      const dataUrl = await ensureImageCached(imgId)
-      if (dataUrl) inputDataUrls.push(dataUrl)
-    }
-
     const result = await callImageApi({
-      settings,
       prompt: task.prompt,
       params: task.params,
       inputImageDataUrls: inputDataUrls,
@@ -371,11 +361,6 @@ async function executeTask(taskId: string) {
     }
 
     useStore.getState().setDetailTaskId(taskId)
-  }
-
-  // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
-  for (const imgId of task.inputImageIds) {
-    imageCache.delete(imgId)
   }
 }
 
