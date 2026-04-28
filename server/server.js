@@ -150,8 +150,12 @@ async function parseUpstreamError(response) {
 }
 
 async function callUpstreamImageApi(userId, payload) {
+  console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}`);
   const apiSettings = await loadUserApiSettings(userId);
   const baseUrl = normalizeBaseUrl(apiSettings.baseUrl);
+
+  console.log(`[${new Date().toISOString()}] ⚙️  API Config - BaseURL: ${baseUrl}, Model: ${apiSettings.model}, Timeout: ${apiSettings.timeout}s, Format: ${apiSettings.apiFormat}`);
+
   if (!baseUrl) {
     throw new Error('未配置默认 API URL');
   }
@@ -169,6 +173,8 @@ async function callUpstreamImageApi(userId, payload) {
     'Cache-Control': 'no-store, no-cache, max-age=0',
     Pragma: 'no-cache',
   };
+
+  console.log(`[${new Date().toISOString()}] 🔧 Request params - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}, Timeout: ${timeout}ms`);
 
   if (apiSettings.apiFormat === 'responses') {
     const tool = {
@@ -192,11 +198,17 @@ async function callUpstreamImageApi(userId, payload) {
       input = prompt;
     }
 
-    const response = await fetch(`${baseUrl}/v1/responses`, {
+    const endpoint = `${baseUrl}/v1/responses`;
+    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: responses`);
+    const fetchStartTime = Date.now();
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        ...authHeaders,
+        Authorization: authHeaders.Authorization,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, max-age=0',
+        Pragma: 'no-cache',
       },
       cache: 'no-store',
       body: JSON.stringify({
@@ -208,7 +220,11 @@ async function callUpstreamImageApi(userId, payload) {
       signal,
     });
 
+    const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
+    console.log(`[${new Date().toISOString()}] 📥 Upstream response received - Status: ${response.status}, Time: ${fetchElapsed}s`);
+
     if (!response.ok) {
+      console.error(`[${new Date().toISOString()}] ⚠️  Upstream API error - Status: ${response.status}`);
       await parseUpstreamError(response);
     }
 
@@ -233,7 +249,12 @@ async function callUpstreamImageApi(userId, payload) {
   }
 
   let response;
+  const fetchStartTime = Date.now();
+
   if (isEdit) {
+    const endpoint = `${baseUrl}/v1/images/edits`;
+    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: edits, Images: ${inputImageDataUrls.length}`);
+
     const formData = new FormData();
     formData.append('model', apiSettings.model);
     formData.append('prompt', prompt);
@@ -255,19 +276,28 @@ async function callUpstreamImageApi(userId, payload) {
       formData.append('image[]', blob, `input-${i + 1}.${ext}`);
     }
 
-    response = await fetch(`${baseUrl}/v1/images/edits`, {
+    response = await fetch(endpoint, {
       method: 'POST',
-      headers: authHeaders,
+      headers: {
+        Authorization: authHeaders.Authorization,
+        'Cache-Control': 'no-store, no-cache, max-age=0',
+        Pragma: 'no-cache',
+      },
       cache: 'no-store',
       body: formData,
       signal,
     });
   } else {
-    response = await fetch(`${baseUrl}/v1/images/generations`, {
+    const endpoint = `${baseUrl}/v1/images/generations`;
+    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: generations`);
+
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        ...authHeaders,
+        Authorization: authHeaders.Authorization,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, max-age=0',
+        Pragma: 'no-cache',
       },
       cache: 'no-store',
       body: JSON.stringify({
@@ -284,7 +314,11 @@ async function callUpstreamImageApi(userId, payload) {
     });
   }
 
+  const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
+  console.log(`[${new Date().toISOString()}] 📥 Upstream response received - Status: ${response.status}, Time: ${fetchElapsed}s`);
+
   if (!response.ok) {
+    console.error(`[${new Date().toISOString()}] ⚠️  Upstream API error - Status: ${response.status}`);
     await parseUpstreamError(response);
   }
 
@@ -384,6 +418,7 @@ const upload = multer({
 
 const requireAuth = (req, res, next) => {
   if (!req.session.userId) {
+    console.log(`[${new Date().toISOString()}] 🚫 Unauthorized access attempt - IP: ${req.ip}, Path: ${req.path}`);
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -392,6 +427,7 @@ const requireAuth = (req, res, next) => {
 // ==================== 认证路由 ====================
 
 app.get('/api/auth/github', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] 🔐 GitHub OAuth initiated - IP: ${req.ip}`);
   const clientId = process.env.GITHUB_CLIENT_ID;
   const redirectUri = process.env.GITHUB_CALLBACK_URL;
   const scope = 'user:email';
@@ -405,21 +441,26 @@ app.get('/api/auth/github', async (req, res) => {
   githubAuthUrl.searchParams.set('redirect_uri', redirectUri);
   githubAuthUrl.searchParams.set('scope', scope);
   githubAuthUrl.searchParams.set('state', state);
+  console.log(`[${new Date().toISOString()}] ↗️  Redirecting to GitHub - State: ${state.substring(0, 8)}...`);
   res.redirect(githubAuthUrl.toString());
 });
 
 app.get('/api/auth/github/callback', async (req, res) => {
   const { code, state } = req.query;
+  console.log(`[${new Date().toISOString()}] 🔙 GitHub callback - Code: ${code ? 'present' : 'missing'}, State: ${state?.substring(0, 8)}...`);
 
   if (!code) {
+    console.error(`[${new Date().toISOString()}] ❌ OAuth callback failed - No code`);
     return redirectWithError(res, 'no_code');
   }
 
   if (!state || state !== req.session.oauthState) {
+    console.error(`[${new Date().toISOString()}] ❌ OAuth callback failed - Invalid state`);
     return redirectWithError(res, 'invalid_state');
   }
 
   try {
+    console.log(`[${new Date().toISOString()}] 🔄 Exchanging code for token`);
     const tokenResponse = await axios.post('https://github.com/login/oauth/access_token', {
       client_id: process.env.GITHUB_CLIENT_ID,
       client_secret: process.env.GITHUB_CLIENT_SECRET,
@@ -429,12 +470,14 @@ app.get('/api/auth/github/callback', async (req, res) => {
     });
 
     const accessToken = tokenResponse.data.access_token;
+    console.log(`[${new Date().toISOString()}] ✅ Token received, fetching user info`);
 
     const userResponse = await axios.get('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
 
     const githubUser = userResponse.data;
+    console.log(`[${new Date().toISOString()}] 👤 GitHub user: ${githubUser.login} (ID: ${githubUser.id})`);
 
     const [rows] = await db.query(
       'SELECT * FROM users WHERE github_id = ?',
@@ -444,16 +487,19 @@ app.get('/api/auth/github/callback', async (req, res) => {
     let userId;
     if (rows.length > 0) {
       userId = rows[0].id;
+      console.log(`[${new Date().toISOString()}] 🔄 Updating existing user ${userId}`);
       await db.query(
         'UPDATE users SET username = ?, avatar_url = ?, email = ?, updated_at = NOW() WHERE id = ?',
         [githubUser.login, githubUser.avatar_url, githubUser.email, userId]
       );
     } else {
+      console.log(`[${new Date().toISOString()}] ➕ Creating new user`);
       const [result] = await db.query(
         'INSERT INTO users (github_id, username, avatar_url, email) VALUES (?, ?, ?, ?)',
         [githubUser.id.toString(), githubUser.login, githubUser.avatar_url, githubUser.email]
       );
       userId = result.insertId;
+      console.log(`[${new Date().toISOString()}] ✅ New user created with ID ${userId}`);
     }
 
     await new Promise((resolve, reject) => {
@@ -470,21 +516,24 @@ app.get('/api/auth/github/callback', async (req, res) => {
     req.session.username = githubUser.login;
 
     await saveSession(req);
+    console.log(`[${new Date().toISOString()}] ✅ Login successful - User ${userId} (${githubUser.login})`);
     res.redirect(process.env.APP_ORIGIN || 'http://localhost:5173');
   } catch (error) {
-    console.error('GitHub OAuth error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ GitHub OAuth error:`, error.message);
     redirectWithError(res, 'auth_failed');
   }
 });
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] 👤 Get current user - User ID: ${req.session.userId}`);
     const [rows] = await db.query(
       'SELECT id, github_id, username, avatar_url, email, created_at FROM users WHERE id = ?',
       [req.session.userId]
     );
 
     if (rows.length === 0) {
+      console.error(`[${new Date().toISOString()}] ❌ User not found in DB - User ID: ${req.session.userId}`);
       clearSessionCookie(res);
       await destroySession(req).catch(() => {});
       return res.status(401).json({ error: 'Unauthorized' });
@@ -495,22 +544,24 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     res.set('Expires', '0');
     res.json(rows[0]);
   } catch (error) {
-    console.error('Get user error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Get user error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.post('/api/auth/logout', async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] 🚪 Logout - User ID: ${req.session?.userId || 'unknown'}`);
     if (req.session) {
       await destroySession(req);
     }
     clearSessionCookie(res);
     res.set('Clear-Site-Data', '"cache", "storage"');
     res.set('Cache-Control', 'no-store');
+    console.log(`[${new Date().toISOString()}] ✅ Logout successful`);
     res.json({ success: true });
   } catch (err) {
-    console.error('Logout failed:', err);
+    console.error(`[${new Date().toISOString()}] ❌ Logout failed:`, err.message);
     res.status(500).json({ error: 'Logout failed' });
   }
 });
@@ -519,6 +570,7 @@ app.post('/api/auth/logout', async (req, res) => {
 
 app.get('/api/settings', requireAuth, async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] ⚙️  Get settings - User ID: ${req.session.userId}`);
     const [rows] = await db.query(
       'SELECT api_url, api_key, settings FROM user_settings WHERE user_id = ?',
       [req.session.userId]
@@ -540,13 +592,14 @@ app.get('/api/settings', requireAuth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get settings error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Get settings error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.post('/api/settings', requireAuth, async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] 💾 Update settings - User ID: ${req.session.userId}`);
     const { api_url, api_key, use_default, settings } = req.body;
 
     const finalApiUrl = use_default ? null : api_url;
@@ -569,9 +622,10 @@ app.post('/api/settings', requireAuth, async (req, res) => {
       );
     }
 
+    console.log(`[${new Date().toISOString()}] ✅ Settings updated`);
     res.json({ success: true });
   } catch (error) {
-    console.error('Update settings error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Update settings error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -580,10 +634,13 @@ app.post('/api/settings', requireAuth, async (req, res) => {
 
 app.get('/api/tasks', requireAuth, async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User ID: ${req.session.userId}`);
     const [rows] = await db.query(
       'SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1000',
       [req.session.userId]
     );
+
+    console.log(`[${new Date().toISOString()}] 📊 Found ${rows.length} tasks`);
 
     const tasks = await Promise.all(rows.map(async task => {
       const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
@@ -615,7 +672,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
     res.json(tasks);
   } catch (error) {
-    console.error('Get tasks error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Get tasks error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -623,15 +680,17 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 app.post('/api/tasks', requireAuth, async (req, res) => {
   try {
     const { id, prompt, params, input_image_ids, started_at } = req.body;
+    console.log(`[${new Date().toISOString()}] ➕ Create task - User ID: ${req.session.userId}, Task ID: ${id}, Prompt: "${prompt?.substring(0, 50)}..."`);
 
     await db.query(
       'INSERT INTO tasks (id, user_id, prompt, status, params, input_image_ids, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [id, req.session.userId, prompt, 'running', JSON.stringify(params), JSON.stringify(input_image_ids || []), started_at]
     );
 
+    console.log(`[${new Date().toISOString()}] ✅ Task created - Task ID: ${id}`);
     res.json({ success: true, id });
   } catch (error) {
-    console.error('Create task error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Create task error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -640,15 +699,17 @@ app.put('/api/tasks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, error_message, output_image_ids, finished_at } = req.body;
+    console.log(`[${new Date().toISOString()}] 🔄 Update task - Task ID: ${id}, Status: ${status}, Images: ${output_image_ids?.length || 0}`);
 
     await db.query(
       'UPDATE tasks SET status = ?, error_message = ?, output_image_ids = ?, finished_at = ? WHERE id = ? AND user_id = ?',
       [status, error_message, JSON.stringify(output_image_ids || []), finished_at, id, req.session.userId]
     );
 
+    console.log(`[${new Date().toISOString()}] ✅ Task updated - Task ID: ${id}`);
     res.json({ success: true });
   } catch (error) {
-    console.error('Update task error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Update task error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -656,25 +717,29 @@ app.put('/api/tasks/:id', requireAuth, async (req, res) => {
 app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`[${new Date().toISOString()}] 🗑️  Delete task - Task ID: ${id}, User ID: ${req.session.userId}`);
 
     await db.query(
       'UPDATE tasks SET deleted_at = NOW() WHERE id = ? AND user_id = ?',
       [id, req.session.userId]
     );
 
+    console.log(`[${new Date().toISOString()}] ✅ Task deleted - Task ID: ${id}`);
     res.json({ success: true });
   } catch (error) {
-    console.error('Delete task error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Delete task error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.delete('/api/tasks', requireAuth, async (req, res) => {
   try {
-    await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [req.session.userId]);
+    console.log(`[${new Date().toISOString()}] 🗑️  Clear all tasks - User ID: ${req.session.userId}`);
+    const [result] = await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [req.session.userId]);
+    console.log(`[${new Date().toISOString()}] ✅ Cleared ${result.affectedRows} tasks`);
     res.json({ success: true });
   } catch (error) {
-    console.error('Clear tasks error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Clear tasks error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -682,12 +747,25 @@ app.delete('/api/tasks', requireAuth, async (req, res) => {
 // ==================== 生成代理路由 ====================
 
 app.post('/api/generate', requireAuth, async (req, res) => {
+  const startTime = Date.now();
+  console.log(`[${new Date().toISOString()}] 🎨 Generate request started - User: ${req.session.userId}, Prompt: "${req.body.prompt?.substring(0, 50)}...", Has input images: ${req.body.inputImageDataUrls?.length || 0}`);
+
   try {
     const result = await callUpstreamImageApi(req.session.userId, req.body);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[${new Date().toISOString()}] ✅ Generate success - User: ${req.session.userId}, Images: ${result.images?.length || 0}, Time: ${elapsed}s`);
     res.set('Cache-Control', 'no-store');
     res.json(result);
   } catch (error) {
-    console.error('Generate image error:', error.response?.data || error.message || error);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.error(`[${new Date().toISOString()}] ❌ Generate failed - User: ${req.session.userId}, Time: ${elapsed}s`);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      cause: error.cause,
+      stack: error.stack?.split('\n').slice(0, 3).join('\n'),
+      response: error.response?.data
+    });
     const status = error.response?.status || 500;
     const message = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Generate failed';
     res.status(status).json({ error: message });
@@ -698,7 +776,9 @@ app.post('/api/generate', requireAuth, async (req, res) => {
 
 app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] 📤 Upload image - User ID: ${req.session.userId}`);
     if (!req.file) {
+      console.error(`[${new Date().toISOString()}] ❌ No file uploaded`);
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
@@ -706,9 +786,11 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     const imageId = crypto.createHash('sha256').update(fileBuffer).digest('hex');
     const fileUrl = `${process.env.IMAGE_BASE_URL}/${req.file.filename}`;
 
+    console.log(`[${new Date().toISOString()}] 🔍 Check existing image - ID: ${imageId}`);
     const [existing] = await db.query('SELECT id, file_url FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
+      console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
       await fs.unlink(req.file.path).catch(() => {});
       return res.json({ id: imageId, url: existing[0].file_url });
     }
@@ -718,9 +800,10 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
       [imageId, req.session.userId, req.file.path, fileUrl, req.file.size, req.file.mimetype, 'upload']
     );
 
+    console.log(`[${new Date().toISOString()}] ✅ Image uploaded - ID: ${imageId}, Size: ${req.file.size} bytes`);
     res.json({ id: imageId, url: fileUrl });
   } catch (error) {
-    console.error('Upload image error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Upload image error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -728,8 +811,10 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
 app.post('/api/images/save', requireAuth, async (req, res) => {
   try {
     const { dataUrl, source = 'generated' } = req.body;
+    console.log(`[${new Date().toISOString()}] 💾 Save image - User ID: ${req.session.userId}, Source: ${source}`);
 
     if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+      console.error(`[${new Date().toISOString()}] ❌ Invalid data URL`);
       return res.status(400).json({ error: 'Invalid data URL' });
     }
 
@@ -738,11 +823,13 @@ app.post('/api/images/save', requireAuth, async (req, res) => {
     const [existing] = await db.query('SELECT id, file_url FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
+      console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
       return res.json({ id: imageId, url: existing[0].file_url });
     }
 
     const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!matches) {
+      console.error(`[${new Date().toISOString()}] ❌ Invalid data URL format`);
       return res.status(400).json({ error: 'Invalid data URL format' });
     }
 
@@ -764,9 +851,10 @@ app.post('/api/images/save', requireAuth, async (req, res) => {
       [imageId, req.session.userId, filePath, fileUrl, buffer.length, `image/${ext}`, source]
     );
 
+    console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes`);
     res.json({ id: imageId, url: fileUrl });
   } catch (error) {
-    console.error('Save image error:', error);
+    console.error(`[${new Date().toISOString()}] ❌ Save image error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -804,5 +892,8 @@ app.get('*', (_req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`[${new Date().toISOString()}] 🚀 Server running on port ${PORT}`);
+  console.log(`[${new Date().toISOString()}] 📝 Environment: ${isProduction ? 'production' : 'development'}`);
+  console.log(`[${new Date().toISOString()}] 🔗 CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
+  console.log(`[${new Date().toISOString()}] 🗄️  Redis: ${redisClient ? 'connected' : 'memory session'}`);
 });
