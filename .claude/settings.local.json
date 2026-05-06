@@ -13,7 +13,9 @@
       "Bash(python -)",
       "Bash(docker buildx *)",
       "Bash(docker image *)",
-      "Bash(grep -E \"\\\\.\\(go|js|sql\\)$\")"
+      "Bash(grep -E \"\\\\.\\(go|js|sql\\)$\")",
+      "Bash(ls -la D:/workspace/new-api 2>/dev/null | head -30)",
+      "Read(//d/workspace/new-api/**)"
     ]
   }
 }

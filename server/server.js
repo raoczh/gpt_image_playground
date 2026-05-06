@@ -199,7 +199,14 @@ async function callUpstreamImageApi(userId, payload) {
     }
 
     const endpoint = `${baseUrl}/v1/responses`;
+    const requestBody = {
+      model: apiSettings.model,
+      input,
+      tools: [tool],
+      tool_choice: 'required',
+    };
     console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: responses`);
+    console.log(`[${new Date().toISOString()}] 📦 Request body:`, JSON.stringify(requestBody, null, 2));
     const fetchStartTime = Date.now();
 
     const response = await fetch(endpoint, {
@@ -211,12 +218,7 @@ async function callUpstreamImageApi(userId, payload) {
         Pragma: 'no-cache',
       },
       cache: 'no-store',
-      body: JSON.stringify({
-        model: apiSettings.model,
-        input,
-        tools: [tool],
-        tool_choice: 'required',
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
 
@@ -267,6 +269,8 @@ async function callUpstreamImageApi(userId, payload) {
       formData.append('output_compression', String(params.output_compression));
     }
 
+    console.log(`[${new Date().toISOString()}] 📦 FormData fields: model=${apiSettings.model}, prompt="${prompt.substring(0, 50)}...", size=${params.size}, quality=${params.quality}, format=${params.output_format}, images=${inputImageDataUrls.length}`);
+
     for (let i = 0; i < inputImageDataUrls.length; i++) {
       const dataUrl = inputImageDataUrls[i];
       const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
@@ -274,6 +278,7 @@ async function callUpstreamImageApi(userId, payload) {
       const blob = new Blob([Buffer.from(matches[2], 'base64')], { type: matches[1] });
       const ext = matches[1].split('/')[1] || 'png';
       formData.append('image[]', blob, `input-${i + 1}.${ext}`);
+      console.log(`[${new Date().toISOString()}] 📎 Added image ${i + 1}: ${matches[1]}, size: ${blob.size} bytes`);
     }
 
     response = await fetch(endpoint, {
@@ -289,7 +294,18 @@ async function callUpstreamImageApi(userId, payload) {
     });
   } else {
     const endpoint = `${baseUrl}/v1/images/generations`;
+    const requestBody = {
+      model: apiSettings.model,
+      prompt,
+      size: params.size,
+      quality: params.quality,
+      output_format: params.output_format,
+      moderation: params.moderation,
+      ...(params.output_format !== 'png' && params.output_compression != null ? { output_compression: params.output_compression } : {}),
+      ...(params.n > 1 ? { n: params.n } : {}),
+    };
     console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: generations`);
+    console.log(`[${new Date().toISOString()}] 📦 Request body:`, JSON.stringify(requestBody, null, 2));
 
     response = await fetch(endpoint, {
       method: 'POST',
@@ -300,16 +316,7 @@ async function callUpstreamImageApi(userId, payload) {
         Pragma: 'no-cache',
       },
       cache: 'no-store',
-      body: JSON.stringify({
-        model: apiSettings.model,
-        prompt,
-        size: params.size,
-        quality: params.quality,
-        output_format: params.output_format,
-        moderation: params.moderation,
-        ...(params.output_format !== 'png' && params.output_compression != null ? { output_compression: params.output_compression } : {}),
-        ...(params.n > 1 ? { n: params.n } : {}),
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
   }
@@ -642,33 +649,49 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
     console.log(`[${new Date().toISOString()}] 📊 Found ${rows.length} tasks`);
 
-    const tasks = await Promise.all(rows.map(async task => {
-      const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
+    // 一次性收集所有任务引用的图片 ID（输入 + 输出），批量查询 URL
+    const parsedRows = rows.map(task => {
       const inputImageIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids;
+      const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
+      return { task, inputImageIds: inputImageIds || [], outputImageIds: outputImageIds || [] };
+    });
 
-      // 查询输出图片的 URL
+    const allImageIds = new Set();
+    for (const { inputImageIds, outputImageIds } of parsedRows) {
+      for (const id of inputImageIds) allImageIds.add(id);
+      for (const id of outputImageIds) allImageIds.add(id);
+    }
+
+    const imageMap = new Map();
+    if (allImageIds.size > 0) {
+      const [images] = await db.query(
+        'SELECT id, file_url FROM images WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+        [Array.from(allImageIds), req.session.userId]
+      );
+      for (const img of images) imageMap.set(img.id, img.file_url);
+    }
+
+    const tasks = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
+      const inputImageUrls = [];
+      for (const id of inputImageIds) {
+        const url = imageMap.get(id);
+        if (url) inputImageUrls.push(url);
+      }
       const outputImageUrls = [];
-      if (outputImageIds && outputImageIds.length > 0) {
-        const [images] = await db.query(
-          'SELECT id, file_url FROM images WHERE id IN (?) AND user_id = ?',
-          [outputImageIds, req.session.userId]
-        );
-        const imageMap = new Map(images.map(img => [img.id, img.file_url]));
-        for (const id of outputImageIds) {
-          if (imageMap.has(id)) {
-            outputImageUrls.push(imageMap.get(id));
-          }
-        }
+      for (const id of outputImageIds) {
+        const url = imageMap.get(id);
+        if (url) outputImageUrls.push(url);
       }
 
       return {
         ...task,
         params: typeof task.params === 'string' ? JSON.parse(task.params) : task.params,
-        input_image_ids: inputImageIds || [],
-        output_image_ids: outputImageIds || [],
+        input_image_ids: inputImageIds,
+        output_image_ids: outputImageIds,
+        input_image_urls: inputImageUrls,
         output_image_urls: outputImageUrls,
       };
-    }));
+    });
 
     res.json(tasks);
   } catch (error) {
@@ -719,10 +742,49 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     console.log(`[${new Date().toISOString()}] 🗑️  Delete task - Task ID: ${id}, User ID: ${req.session.userId}`);
 
+    // 先取出该任务关联的图片 ID
+    const [taskRows] = await db.query(
+      'SELECT input_image_ids, output_image_ids FROM tasks WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [id, req.session.userId]
+    );
+
     await db.query(
       'UPDATE tasks SET deleted_at = NOW() WHERE id = ? AND user_id = ?',
       [id, req.session.userId]
     );
+
+    // 联动软删除该任务关联的图片（若没有被其他存活任务引用）
+    if (taskRows.length > 0) {
+      const task = taskRows[0];
+      const inputIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : (task.input_image_ids || []);
+      const outputIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : (task.output_image_ids || []);
+      const allImageIds = [...new Set([...(inputIds || []), ...(outputIds || [])])];
+
+      if (allImageIds.length > 0) {
+        // 找出当前用户其他存活任务仍在引用的图片 ID
+        const [otherTasks] = await db.query(
+          'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
+          [req.session.userId]
+        );
+
+        const stillReferenced = new Set();
+        for (const t of otherTasks) {
+          const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
+          const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
+          for (const imgId of (ii || [])) stillReferenced.add(imgId);
+          for (const imgId of (oi || [])) stillReferenced.add(imgId);
+        }
+
+        const orphanIds = allImageIds.filter(imgId => !stillReferenced.has(imgId));
+        if (orphanIds.length > 0) {
+          const [imgResult] = await db.query(
+            'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+            [orphanIds, req.session.userId]
+          );
+          console.log(`[${new Date().toISOString()}] 🗑️  Soft-deleted ${imgResult.affectedRows} associated images`);
+        }
+      }
+    }
 
     console.log(`[${new Date().toISOString()}] ✅ Task deleted - Task ID: ${id}`);
     res.json({ success: true });
@@ -736,7 +798,12 @@ app.delete('/api/tasks', requireAuth, async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] 🗑️  Clear all tasks - User ID: ${req.session.userId}`);
     const [result] = await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [req.session.userId]);
-    console.log(`[${new Date().toISOString()}] ✅ Cleared ${result.affectedRows} tasks`);
+    // 同步软删除该用户的所有图片
+    const [imgResult] = await db.query(
+      'UPDATE images SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL',
+      [req.session.userId]
+    );
+    console.log(`[${new Date().toISOString()}] ✅ Cleared ${result.affectedRows} tasks, ${imgResult.affectedRows} images`);
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Clear tasks error:`, error.message);
@@ -787,10 +854,16 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     const fileUrl = `${process.env.IMAGE_BASE_URL}/${req.file.filename}`;
 
     console.log(`[${new Date().toISOString()}] 🔍 Check existing image - ID: ${imageId}`);
-    const [existing] = await db.query('SELECT id, file_url FROM images WHERE id = ?', [imageId]);
+    const [existing] = await db.query('SELECT id, file_url, deleted_at FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
-      console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
+      // 若图片之前被软删除，则恢复
+      if (existing[0].deleted_at) {
+        await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
+        console.log(`[${new Date().toISOString()}] ♻️  Restored soft-deleted image - ID: ${imageId}`);
+      } else {
+        console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
+      }
       await fs.unlink(req.file.path).catch(() => {});
       return res.json({ id: imageId, url: existing[0].file_url });
     }
@@ -820,10 +893,16 @@ app.post('/api/images/save', requireAuth, async (req, res) => {
 
     const imageId = crypto.createHash('sha256').update(dataUrl).digest('hex');
 
-    const [existing] = await db.query('SELECT id, file_url FROM images WHERE id = ?', [imageId]);
+    const [existing] = await db.query('SELECT id, file_url, deleted_at FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
-      console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
+      // 若图片之前被软删除，则恢复
+      if (existing[0].deleted_at) {
+        await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
+        console.log(`[${new Date().toISOString()}] ♻️  Restored soft-deleted image - ID: ${imageId}`);
+      } else {
+        console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
+      }
       return res.json({ id: imageId, url: existing[0].file_url });
     }
 
@@ -864,7 +943,7 @@ app.get('/api/images/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     const [rows] = await db.query(
-      'SELECT id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ? AND user_id = ?',
+      'SELECT id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
       [id, req.session.userId]
     );
 

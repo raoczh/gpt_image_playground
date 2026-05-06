@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask } from '../store'
+import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { formatImageRatio } from '../lib/size'
 
@@ -12,7 +12,6 @@ export default function DetailModal() {
   const showToast = useStore((s) => s.showToast)
 
   const [imageIndex, setImageIndex] = useState(0)
-  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>({})
   const [imageRatios, setImageRatios] = useState<Record<string, string>>({})
   const [imageSizes, setImageSizes] = useState<Record<string, string>>({})
   const imagePanelRef = useRef<HTMLDivElement>(null)
@@ -30,16 +29,6 @@ export default function DetailModal() {
   useEffect(() => {
     setImageIndex(0)
   }, [detailTaskId])
-
-  // 加载所有相关图片
-  useEffect(() => {
-    if (!task) return
-    const newSrcs: Record<string, string> = {}
-    for (const url of task.outputImages || []) {
-      newSrcs[url] = url
-    }
-    setImageSrcs(newSrcs)
-  }, [task])
 
   const currentOutputImageId = task?.outputImages?.[imageIndex] || ''
   const currentOutputImageSrc = currentOutputImageId
@@ -153,8 +142,7 @@ export default function DetailModal() {
   }
 
   const handleCopyInputImage = async () => {
-    const imgId = task.inputImageIds?.[0]
-    const src = imgId ? imageSrcs[imgId] : ''
+    const src = task.inputImageUrls?.[0]
     if (!src) return
     try {
       const res = await fetch(src)
@@ -353,15 +341,18 @@ export default function DetailModal() {
                   </button>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  {task.inputImageIds.map((imgId) => (
-                    <img
-                      key={imgId}
-                      src={imageSrcs[imgId] || ''}
-                      className="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-white/[0.08] cursor-pointer hover:opacity-80 transition"
-                      onClick={() => setLightboxImageId(imgId, task.inputImageIds)}
-                      alt=""
-                    />
-                  ))}
+                  {task.inputImageIds.map((imgId, idx) => {
+                    const url = task.inputImageUrls?.[idx] || ''
+                    return (
+                      <img
+                        key={imgId}
+                        src={url}
+                        className="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-white/[0.08] cursor-pointer hover:opacity-80 transition"
+                        onClick={() => url && setLightboxImageId(url, task.inputImageUrls || [])}
+                        alt=""
+                      />
+                    )
+                  })}
                 </div>
               </div>
             )}

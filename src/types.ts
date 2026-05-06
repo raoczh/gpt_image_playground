@@ -61,6 +61,8 @@ export interface TaskRecord {
   params: TaskParams
   /** 输入图片的 image store id 列表 */
   inputImageIds: string[]
+  /** 输入图片的 URL 列表（用于详情展示和放大预览） */
+  inputImageUrls: string[]
   /** 输出图片的 URL 列表 */
   outputImages: string[]
   status: TaskStatus

@@ -305,7 +305,7 @@ export default function InputBar() {
               <img
                 src={img.dataUrl}
                 className="w-full h-full object-cover hover:opacity-90 transition-opacity"
-                onClick={() => setLightboxImageId(img.id, inputImages.map((i) => i.id))}
+                onClick={() => setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))}
                 alt=""
               />
             </div>

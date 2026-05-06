@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useStore, getCachedImage, ensureImageCached } from '../store'
+import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
 const MIN_SCALE = 1

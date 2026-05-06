@@ -3,3 +3,6 @@
 
 ALTER TABLE tasks ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER finished_at;
 ALTER TABLE tasks ADD INDEX idx_deleted_at (deleted_at);
+
+ALTER TABLE images ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER height;
+ALTER TABLE images ADD INDEX idx_deleted_at (deleted_at);
