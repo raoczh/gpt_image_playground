@@ -37,6 +37,7 @@ export default function InputBar() {
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
+  const pendingImageCount = useStore((s) => s.pendingImageCount)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const setShowSettings = useStore((s) => s.setShowSettings)
@@ -63,7 +64,11 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
-  const canSubmit = Boolean(prompt.trim() || inputImages.length) && !!useStore.getState().user
+  const isUploading = pendingImageCount > 0
+  const canSubmit =
+    Boolean(prompt.trim() || inputImages.length) &&
+    !!useStore.getState().user &&
+    !isUploading
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
 
   useEffect(() => {
@@ -542,13 +547,14 @@ export default function InputBar() {
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
+                  <ButtonTooltip visible={isUploading && submitHover} text="图片处理中，请稍候…" />
                   <button
                     onClick={() => canSubmit && submitTask()}
                     disabled={!canSubmit}
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
                       'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
-                    title='生成 (Ctrl+Enter)'
+                    title={isUploading ? '图片处理中…' : '生成 (Ctrl+Enter)'}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -593,6 +599,7 @@ export default function InputBar() {
                   onMouseEnter={() => setSubmitHover(true)}
                   onMouseLeave={() => setSubmitHover(false)}
                 >
+                  <ButtonTooltip visible={isUploading && submitHover} text="图片处理中，请稍候…" />
                   <button
                     onClick={() => canSubmit && submitTask()}
                     disabled={!canSubmit}
@@ -603,7 +610,7 @@ export default function InputBar() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                     </svg>
-                    生成图像
+                    {isUploading ? '图片处理中…' : '生成图像'}
                   </button>
                 </div>
               </div>

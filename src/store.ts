@@ -65,6 +65,10 @@ interface AppState {
   removeInputImage: (idx: number) => void
   clearInputImages: () => void
   setInputImages: (imgs: InputImage[]) => void
+  /** 正在处理（上传/转码）中的图片数量，用于阻止 race 提交 */
+  pendingImageCount: number
+  incrementPendingImage: () => void
+  decrementPendingImage: () => void
 
   // 参数
   params: TaskParams
@@ -123,15 +127,22 @@ export const useStore = create<AppState>()((set) => ({
       return { inputImages: [...s.inputImages, img] }
     }),
   removeInputImage: (idx) =>
-    set((s) => ({
-      inputImages: s.inputImages.filter((_, i) => i !== idx),
-    })),
+    set((s) => {
+      const removed = s.inputImages[idx]
+      if (removed) imageCache.delete(removed.id)
+      return { inputImages: s.inputImages.filter((_, i) => i !== idx) }
+    }),
   clearInputImages: () =>
     set((s) => {
       for (const img of s.inputImages) imageCache.delete(img.id)
       return { inputImages: [] }
     }),
   setInputImages: (imgs) => set({ inputImages: imgs }),
+  pendingImageCount: 0,
+  incrementPendingImage: () =>
+    set((s) => ({ pendingImageCount: s.pendingImageCount + 1 })),
+  decrementPendingImage: () =>
+    set((s) => ({ pendingImageCount: Math.max(0, s.pendingImageCount - 1) })),
 
   // Params
   params: { ...DEFAULT_PARAMS },
@@ -250,12 +261,8 @@ export async function submitTask() {
     useStore.getState().setParams({ size: normalizedParams.size })
   }
 
-  // 在清空之前，先获取所有输入图片的 dataUrl
-  const inputImageDataUrls: string[] = []
-  for (const img of inputImages) {
-    const dataUrl = await ensureImageCached(img.id)
-    if (dataUrl) inputImageDataUrls.push(dataUrl)
-  }
+  // 输入图片的 dataUrl 直接来自 store；InputImage 创建时已固化。
+  const inputImageDataUrls = inputImages.map((i) => i.dataUrl)
 
   const taskId = genId()
   const task: TaskRecord = {
@@ -618,22 +625,37 @@ export async function importData(file: File) {
   }
 }
 
-/** 添加图片到输入（文件上传）—— 仅放入内存缓存，不写 IndexedDB */
+/** 添加图片到输入（文件上传）—— 已登录时使用服务端返回的 ID 保证一致 */
 export async function addImageFromFile(file: File): Promise<void> {
   if (!file.type.startsWith('image/')) return
-  const dataUrl = await fileToDataUrl(file)
-  const id = await hashDataUrl(dataUrl)
-  imageCache.set(id, dataUrl)
-  useStore.getState().addInputImage({ id, dataUrl })
 
-  // 如果用户已登录，上传到服务器
-  const { user } = useStore.getState()
-  if (user) {
-    try {
-      await backendApi.uploadImage(file)
-    } catch (error) {
-      console.error('Failed to upload image to backend:', error)
+  const { incrementPendingImage, decrementPendingImage } = useStore.getState()
+  incrementPendingImage()
+  try {
+    const dataUrl = await fileToDataUrl(file)
+
+    let id: string
+    const { user } = useStore.getState()
+    if (user) {
+      try {
+        const result = await backendApi.uploadImage(file)
+        id = result.id
+      } catch (error) {
+        useStore.getState().showToast(
+          `图片上传失败：${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        )
+        return
+      }
+    } else {
+      // 未登录场景下仅做本地预览（实际无法提交任务）
+      id = await hashDataUrl(dataUrl)
     }
+
+    imageCache.set(id, dataUrl)
+    useStore.getState().addInputImage({ id, dataUrl })
+  } finally {
+    decrementPendingImage()
   }
 }
 

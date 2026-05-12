@@ -672,16 +672,9 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     }
 
     const tasks = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
-      const inputImageUrls = [];
-      for (const id of inputImageIds) {
-        const url = imageMap.get(id);
-        if (url) inputImageUrls.push(url);
-      }
-      const outputImageUrls = [];
-      for (const id of outputImageIds) {
-        const url = imageMap.get(id);
-        if (url) outputImageUrls.push(url);
-      }
+      // 保留占位（缺失填空串），保证与 ID 数组的索引一一对应
+      const inputImageUrls = inputImageIds.map(id => imageMap.get(id) || '');
+      const outputImageUrls = outputImageIds.map(id => imageMap.get(id) || '');
 
       return {
         ...task,
@@ -850,7 +843,11 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     }
 
     const fileBuffer = await fs.readFile(req.file.path);
-    const imageId = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    // 与客户端 hashDataUrl 和 /api/images/save 保持一致：sha256(dataUrl 字符串)
+    const ext = (path.extname(req.file.originalname).slice(1) || 'png').toLowerCase();
+    const mime = req.file.mimetype || `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+    const dataUrl = `data:${mime};base64,${fileBuffer.toString('base64')}`;
+    const imageId = crypto.createHash('sha256').update(dataUrl).digest('hex');
     const fileUrl = `${process.env.IMAGE_BASE_URL}/${req.file.filename}`;
 
     console.log(`[${new Date().toISOString()}] 🔍 Check existing image - ID: ${imageId}`);
