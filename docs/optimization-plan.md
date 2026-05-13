@@ -10,7 +10,7 @@
 | 阶段 | 内容性质 | 风险 | 状态 |
 |---|---|---|---|
 | **Phase 1** | 小而美的 bug 修复 + 体验改进 | 低 | ✅ 完成 |
-| **Phase 2** | 涉及前后端协议改动的中型重构 | 中 | ✅ 已完成 P2-1/2/4/5/6/7；⏸️ P2-3 留单独立项 |
+| **Phase 2** | 涉及前后端协议改动的中型重构 | 中 | ✅ 完成（P2-3 落地最小版，完整异步流暂不引入） |
 
 ---
 
@@ -164,8 +164,10 @@
 
 ### ✅ P2-6 物理文件清理
 
-- **位置**：[server/server.js cleanupSoftDeleted](server/server.js)（startup + setInterval 24h）
-- **方案**：扫 `images.deleted_at < NOW() - INTERVAL 30 DAY`，unlink 原图 + 缩略图，DELETE DB 行；tasks 表同样硬删 30 天前的 soft-deleted 行
+- **位置**：[server/server.js cleanupSoftDeleted / cleanupOrphanFiles](server/server.js)
+- **方案**：两层互补清理
+  - **软删超期清理**（`cleanupSoftDeleted`）：启动 + 每 24h，扫 `images.deleted_at < NOW() - INTERVAL 30 DAY`，unlink 原图+缩略图，DELETE DB 行；tasks 表同样硬删过期软删行
+  - **磁盘孤儿扫描**（`cleanupOrphanFiles`）：仅启动时跑一次。读 `IMAGE_UPLOAD_DIR` 下所有文件，与 DB `images` 表所有 `file_path`/`thumb_path`（含软删行）做集合差，磁盘上有但 DB 从未引用的文件直接 unlink。处理部分失败/历史脏数据/手动放入的文件
 - 失败单条跳过、记 warn 日志；不引入额外依赖（用 `setInterval`，不依赖 node-cron）
 
 ### ✅ P2-7 错误信息友好化
@@ -174,10 +176,17 @@
 - **方案**：`UPSTREAM_ERROR_PATTERNS` 数组按优先级匹配（rate limit / quota / safety / size / auth / timeout / model / network），命中即替换为中文；未命中保留原文
 - `/api/generate` catch 里非业务错误（`statusCode` 未设）也走友好化，覆盖 abort/timeout/网络异常
 
-### ⏸️ P2-3 任务状态机改为服务端权威
+### ✅ P2-3 任务状态机服务端权威（最小版）
 
-- **未做**：工作量 1-2 天，涉及任务流范式变化（前端发起 → 服务端权威 + 轮询/SSE）
-- **后续**：需独立立项 + 单独 PR
+- **位置**：[server/server.js](server/server.js) `/api/generate` + `cleanupStuckTasks`，[src/store.ts](src/store.ts) executeTask
+- **痛点**：前端断网/关标签页后，task 永远停在 `running`，但服务端图片其实已经生成落盘
+- **方案**：服务端 `/api/generate` 内部直接 UPDATE tasks 状态（done/error），不再依赖前端 PUT 回调；新增 zombie task 定时清理
+- **改动**：
+  - 前端 [api.ts CallApiOptions](src/lib/api.ts) 加 `taskId`，请求体带上
+  - 服务端 [/api/generate](server/server.js) 成功路径 UPDATE 设 status='done' / output_image_ids / finished_at；catch 路径 UPDATE 设 status='error' / error_message / finished_at（与 res.json 错误响应同源）
+  - 前端 [executeTask](src/store.ts) 去掉两处 `backendApi.updateTask`，只做本地 store 更新（UI 即时反馈）；后端 PUT 端点保留作兼容/容错入口
+  - 新增 [cleanupStuckTasks](server/server.js)：启动 + 每 1h 扫 `status='running' AND started_at < NOW() - 30 min` 的 task，UPDATE 为 error，error_message='生成超时（服务端检测）'。覆盖"前端创建 task 后立刻断网、根本没调 /api/generate"的极端 zombie 场景
+- **未做的完整版**：202 + 后台 job + 轮询/SSE。当前任务 30-90s 同步等待可接受，引入异步流的复杂度暂时不划算
 
 ---
 
@@ -206,10 +215,10 @@
 | P2-2 服务端缩略图 | ✅ | 引入 sharp，落盘原图同步生成 256px webp 缩略图；DB 加 `thumb_path`/`thumb_url`；`/api/tasks` 同时返回缩略图 URL；启动时 backfill 历史图（并发 4）；前端列表/输入图小图优先用缩略图，Lightbox/详情大图用原图 |
 | P2-4 任务列表分页 | ✅ | `/api/tasks?cursor=&limit=20`，cursor 基于 (created_at, id) base64 编码；前端 IntersectionObserver 触发下一页；首页重载保留本地 running 任务 |
 | P2-5 搜索过滤后端化 | ✅ | `q` 走 prompt LIKE，`status` 过滤；前端 debounce 300ms 触发；TaskGrid 移除前端 filter |
-| P2-6 物理文件清理 | ✅ | 启动 + 每 24h 扫 `deleted_at > 30d` 的 images 与 tasks，硬删并 unlink 原图/缩略图 |
+| P2-6 物理文件清理 | ✅ | 双层互补：每 24h 清软删超期（30 天保留期）；启动时扫一次磁盘孤儿（DB 完全没记录的文件） |
 | P2-7 错误信息友好化 | ✅ | parseUpstreamError + `/api/generate` catch 走 `friendlyUpstreamMessage`，覆盖限流/额度/安全/尺寸/鉴权/超时/模型/网络 8 类 |
-| P2-3 任务状态机服务端权威 | ⏸️ | 工作量 1-2 天，留单独立项 |
+| P2-3 任务状态机服务端权威 | ✅ | 最小版：`/api/generate` 内部 UPDATE tasks 状态；前端 executeTask 去掉 PUT 回调；新增 cleanupStuckTasks 启动+每 1h 扫 running 超 30min 的 zombie task |
 
 **后续建议下一轮**：
 
-- **P2-3** ⭐⭐ 任务状态机改为服务端权威（剩余唯一中型项，1-2 天，需独立立项）
+- 暂无计划内项目。若未来生成耗时显著拉长或用户量起来，可考虑 P2-3 完整版（202 + 后台 job + 轮询/SSE）。

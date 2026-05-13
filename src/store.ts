@@ -393,11 +393,11 @@ async function executeTask(taskId: string, inputImageIds: string[]) {
       prompt: task.prompt,
       params: task.params,
       inputImageIds,
+      taskId,
       timeoutSec: useStore.getState().settings.timeout,
     })
 
-    // 服务端已落盘并返回 id+url+thumb，前端不再二次 POST /api/images/save
-    const outputIds = result.images.map((r) => r.id)
+    // 服务端已落盘并直接 UPDATE tasks 状态，前端只更新本地 store
     const outputImages = result.images.map((r) => r.url)
     const outputThumbnails = result.images.map((r) => r.thumb || '')
 
@@ -409,38 +409,15 @@ async function executeTask(taskId: string, inputImageIds: string[]) {
       elapsed: Date.now() - task.createdAt,
     })
 
-    try {
-      await backendApi.updateTask(taskId, {
-        status: 'done',
-        output_image_ids: outputIds,
-        finished_at: Date.now(),
-      })
-    } catch (error) {
-      console.error('Failed to sync task completion to backend:', error)
-    }
-
     useStore.getState().showToast(`生成完成，共 ${outputImages.length} 张图片`, 'success')
   } catch (err) {
+    // 服务端 /api/generate catch 块里也会 UPDATE tasks 为 error，这里只更新本地 store
     updateTaskInStore(taskId, {
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
-
-    // 如果用户已登录，同步错误状态到后端
-    const { user } = useStore.getState()
-    if (user) {
-      try {
-        await backendApi.updateTask(taskId, {
-          status: 'error',
-          error_message: err instanceof Error ? err.message : String(err),
-          finished_at: Date.now(),
-        })
-      } catch (error) {
-        console.error('Failed to sync task error to backend:', error)
-      }
-    }
 
     useStore.getState().setDetailTaskId(taskId)
   }

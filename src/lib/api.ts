@@ -7,6 +7,8 @@ export interface CallApiOptions {
   prompt: string
   params: TaskParams
   inputImageIds: string[]
+  /** 关联的 task ID，服务端用它来直接更新 tasks 表状态，避免依赖前端回调 */
+  taskId: string
   /** 上游超时（秒），客户端会自动多加 10s 容差再发起 abort */
   timeoutSec?: number
 }
@@ -42,6 +44,7 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       prompt: opts.prompt,
       params: opts.params,
       inputImageIds: opts.inputImageIds,
+      taskId: opts.taskId,
     }),
     signal,
   })
