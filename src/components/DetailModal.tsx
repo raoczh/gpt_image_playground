@@ -343,10 +343,11 @@ export default function DetailModal() {
                 <div className="flex gap-2 flex-wrap">
                   {task.inputImageIds.map((imgId, idx) => {
                     const url = task.inputImageUrls?.[idx] || ''
+                    const thumb = task.inputThumbnails?.[idx] || url
                     return (
                       <img
                         key={imgId}
-                        src={url}
+                        src={thumb}
                         className="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-white/[0.08] cursor-pointer hover:opacity-80 transition"
                         onClick={() => url && setLightboxImageId(url, task.inputImageUrls || [])}
                         alt=""

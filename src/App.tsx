@@ -95,9 +95,12 @@ export default function App() {
     getCurrentUser()
       .then((user) => {
         setUser(user)
-        // 用户登录成功后清空浏览器存储
+        // 用户登录成功后清空浏览器存储（保留应用持久化偏好）
         if (user) {
-          localStorage.clear()
+          const PRESERVE_KEYS = new Set(['gpt-image-playground-prefs'])
+          for (const key of Object.keys(localStorage)) {
+            if (!PRESERVE_KEYS.has(key)) localStorage.removeItem(key)
+          }
           sessionStorage.clear()
         }
       })

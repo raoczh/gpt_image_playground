@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
 import axios from 'axios';
+import sharp from 'sharp';
 import db from './db.js';
 
 dotenv.config();
@@ -149,6 +150,99 @@ async function parseUpstreamError(response) {
   throw new Error(errorMsg);
 }
 
+// 把生成/上传的图片字节写入磁盘并落库；与客户端 hashDataUrl 保持一致：sha256("data:${mime};base64,${b64}")。
+// 已存在则恢复软删除并返回既有 url，避免重复落盘。
+const THUMB_SIZE = 256;
+const THUMB_QUALITY = 70;
+
+// 生成 256px webp 缩略图 buffer；失败返回 null，由调用方决定降级
+async function generateThumbnailBuffer(srcBuffer) {
+  try {
+    return await sharp(srcBuffer)
+      .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: THUMB_QUALITY })
+      .toBuffer();
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] ⚠️  Thumbnail generation failed: ${err.message}`);
+    return null;
+  }
+}
+
+// 写缩略图到磁盘并返回 { thumbPath, thumbUrl }；失败返回 { thumbPath: null, thumbUrl: null }
+async function writeThumbnail(srcBuffer, imageId, dir) {
+  const thumb = await generateThumbnailBuffer(srcBuffer);
+  if (!thumb) return { thumbPath: null, thumbUrl: null };
+  const thumbName = `${imageId}_thumb.webp`;
+  const thumbPath = path.join(dir, thumbName);
+  try {
+    await fs.writeFile(thumbPath, thumb);
+    return { thumbPath, thumbUrl: `${process.env.IMAGE_BASE_URL}/${thumbName}` };
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] ⚠️  Thumbnail write failed for ${imageId}: ${err.message}`);
+    return { thumbPath: null, thumbUrl: null };
+  }
+}
+
+async function saveGeneratedImageBytes({ userId, buffer, mime, source = 'generated' }) {
+  const b64 = buffer.toString('base64');
+  const dataUrl = `data:${mime};base64,${b64}`;
+  const imageId = crypto.createHash('sha256').update(dataUrl).digest('hex');
+
+  const [existing] = await db.query('SELECT id, file_url, thumb_url, deleted_at FROM images WHERE id = ?', [imageId]);
+  if (existing.length > 0) {
+    if (existing[0].deleted_at) {
+      await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
+      console.log(`[${new Date().toISOString()}] ♻️  Restored soft-deleted image - ID: ${imageId}`);
+    } else {
+      console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
+    }
+    return { id: imageId, url: existing[0].file_url, thumb: existing[0].thumb_url || '' };
+  }
+
+  const ext = (mime.split('/')[1] || 'png').toLowerCase();
+  const uploadDir = process.env.IMAGE_UPLOAD_DIR || '/data/images';
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const filename = `${imageId}.${ext}`;
+  const filePath = path.join(uploadDir, filename);
+  await fs.writeFile(filePath, buffer);
+
+  const { thumbPath, thumbUrl } = await writeThumbnail(buffer, imageId, uploadDir);
+
+  const fileUrl = `${process.env.IMAGE_BASE_URL}/${filename}`;
+  await db.query(
+    'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [imageId, userId, filePath, fileUrl, thumbPath, thumbUrl, buffer.length, mime, source]
+  );
+
+  console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
+  return { id: imageId, url: fileUrl, thumb: thumbUrl || '' };
+}
+
+// 按 ID 从磁盘批量加载输入图片，保持顺序并构造 dataUrl 列表。缺图抛业务错误（statusCode=400）。
+async function loadInputImageDataUrls(userId, inputImageIds) {
+  if (!Array.isArray(inputImageIds) || inputImageIds.length === 0) return [];
+
+  const [rows] = await db.query(
+    'SELECT id, file_path, mime_type FROM images WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+    [inputImageIds, userId]
+  );
+  const map = new Map(rows.map((r) => [r.id, r]));
+
+  const dataUrls = [];
+  for (const id of inputImageIds) {
+    const row = map.get(id);
+    if (!row) {
+      const err = new Error(`参考图 ${id} 不存在或已被删除`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const buffer = await fs.readFile(row.file_path);
+    dataUrls.push(`data:${row.mime_type};base64,${buffer.toString('base64')}`);
+  }
+  return dataUrls;
+}
+
 async function callUpstreamImageApi(userId, payload) {
   console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}`);
   const apiSettings = await loadUserApiSettings(userId);
@@ -163,8 +257,9 @@ async function callUpstreamImageApi(userId, payload) {
     throw new Error('未配置默认 API Key');
   }
 
-  const { prompt, params, inputImageDataUrls } = payload;
-  const isEdit = Array.isArray(inputImageDataUrls) && inputImageDataUrls.length > 0;
+  const { prompt, params, inputImageIds } = payload;
+  const inputImageDataUrls = await loadInputImageDataUrls(userId, inputImageIds);
+  const isEdit = inputImageDataUrls.length > 0;
   const mime = MIME_MAP[params.output_format] || 'image/png';
   const timeout = Math.max(Number(apiSettings.timeout) || 600, 10) * 1000;
   const signal = AbortSignal.timeout(timeout);
@@ -174,7 +269,7 @@ async function callUpstreamImageApi(userId, payload) {
     Pragma: 'no-cache',
   };
 
-  console.log(`[${new Date().toISOString()}] 🔧 Request params - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}, Timeout: ${timeout}ms`);
+  console.log(`[${new Date().toISOString()}] 🔧 Request params - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}, Timeout: ${timeout}ms, Input image IDs: ${inputImageIds?.length || 0}`);
 
   if (apiSettings.apiFormat === 'responses') {
     const tool = {
@@ -269,7 +364,11 @@ async function callUpstreamImageApi(userId, payload) {
       formData.append('output_compression', String(params.output_compression));
     }
 
-    console.log(`[${new Date().toISOString()}] 📦 FormData fields: model=${apiSettings.model}, prompt="${prompt.substring(0, 50)}...", size=${params.size}, quality=${params.quality}, format=${params.output_format}, images=${inputImageDataUrls.length}`);
+    if (params.n && params.n > 1) {
+      formData.append('n', String(params.n));
+    }
+
+    console.log(`[${new Date().toISOString()}] 📦 FormData fields: model=${apiSettings.model}, prompt="${prompt.substring(0, 50)}...", size=${params.size}, quality=${params.quality}, format=${params.output_format}, images=${inputImageDataUrls.length}, n=${params.n || 1}`);
 
     for (let i = 0; i < inputImageDataUrls.length; i++) {
       const dataUrl = inputImageDataUrls[i];
@@ -665,16 +764,18 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     const imageMap = new Map();
     if (allImageIds.size > 0) {
       const [images] = await db.query(
-        'SELECT id, file_url FROM images WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+        'SELECT id, file_url, thumb_url FROM images WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
         [Array.from(allImageIds), req.session.userId]
       );
-      for (const img of images) imageMap.set(img.id, img.file_url);
+      for (const img of images) imageMap.set(img.id, { url: img.file_url, thumb: img.thumb_url || '' });
     }
 
     const tasks = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
       // 保留占位（缺失填空串），保证与 ID 数组的索引一一对应
-      const inputImageUrls = inputImageIds.map(id => imageMap.get(id) || '');
-      const outputImageUrls = outputImageIds.map(id => imageMap.get(id) || '');
+      const inputImageUrls = inputImageIds.map(id => imageMap.get(id)?.url || '');
+      const outputImageUrls = outputImageIds.map(id => imageMap.get(id)?.url || '');
+      const inputThumbUrls = inputImageIds.map(id => imageMap.get(id)?.thumb || '');
+      const outputThumbUrls = outputImageIds.map(id => imageMap.get(id)?.thumb || '');
 
       return {
         ...task,
@@ -683,6 +784,8 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         output_image_ids: outputImageIds,
         input_image_urls: inputImageUrls,
         output_image_urls: outputImageUrls,
+        input_thumb_urls: inputThumbUrls,
+        output_thumb_urls: outputThumbUrls,
       };
     });
 
@@ -808,14 +911,33 @@ app.delete('/api/tasks', requireAuth, async (req, res) => {
 
 app.post('/api/generate', requireAuth, async (req, res) => {
   const startTime = Date.now();
-  console.log(`[${new Date().toISOString()}] 🎨 Generate request started - User: ${req.session.userId}, Prompt: "${req.body.prompt?.substring(0, 50)}...", Has input images: ${req.body.inputImageDataUrls?.length || 0}`);
+  console.log(`[${new Date().toISOString()}] 🎨 Generate request started - User: ${req.session.userId}, Prompt: "${req.body.prompt?.substring(0, 50)}...", Input image IDs: ${req.body.inputImageIds?.length || 0}`);
 
   try {
     const result = await callUpstreamImageApi(req.session.userId, req.body);
+
+    // 服务端直接落盘：避免再让客户端 POST 回 /api/images/save 走一次 base64 往返
+    const saved = [];
+    for (const dataUrl of result.images) {
+      const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (!matches) continue;
+      const item = await saveGeneratedImageBytes({
+        userId: req.session.userId,
+        buffer: Buffer.from(matches[2], 'base64'),
+        mime: matches[1],
+        source: 'generated',
+      });
+      saved.push(item);
+    }
+
+    if (!saved.length) {
+      throw new Error('上游返回的图片均无法解析');
+    }
+
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`[${new Date().toISOString()}] ✅ Generate success - User: ${req.session.userId}, Images: ${result.images?.length || 0}, Time: ${elapsed}s`);
+    console.log(`[${new Date().toISOString()}] ✅ Generate success - User: ${req.session.userId}, Images: ${saved.length}, Time: ${elapsed}s`);
     res.set('Cache-Control', 'no-store');
-    res.json(result);
+    res.json({ images: saved });
   } catch (error) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.error(`[${new Date().toISOString()}] ❌ Generate failed - User: ${req.session.userId}, Time: ${elapsed}s`);
@@ -826,7 +948,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
       stack: error.stack?.split('\n').slice(0, 3).join('\n'),
       response: error.response?.data
     });
-    const status = error.response?.status || 500;
+    const status = error.statusCode || error.response?.status || 500;
     const message = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Generate failed';
     res.status(status).json({ error: message });
   }
@@ -851,7 +973,7 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     const fileUrl = `${process.env.IMAGE_BASE_URL}/${req.file.filename}`;
 
     console.log(`[${new Date().toISOString()}] 🔍 Check existing image - ID: ${imageId}`);
-    const [existing] = await db.query('SELECT id, file_url, deleted_at FROM images WHERE id = ?', [imageId]);
+    const [existing] = await db.query('SELECT id, file_url, thumb_url, deleted_at FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
       // 若图片之前被软删除，则恢复
@@ -862,16 +984,18 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
         console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
       }
       await fs.unlink(req.file.path).catch(() => {});
-      return res.json({ id: imageId, url: existing[0].file_url });
+      return res.json({ id: imageId, url: existing[0].file_url, thumb: existing[0].thumb_url || '' });
     }
 
+    const { thumbPath, thumbUrl } = await writeThumbnail(fileBuffer, imageId, path.dirname(req.file.path));
+
     await db.query(
-      'INSERT INTO images (id, user_id, file_path, file_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [imageId, req.session.userId, req.file.path, fileUrl, req.file.size, req.file.mimetype, 'upload']
+      'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [imageId, req.session.userId, req.file.path, fileUrl, thumbPath, thumbUrl, req.file.size, req.file.mimetype, 'upload']
     );
 
-    console.log(`[${new Date().toISOString()}] ✅ Image uploaded - ID: ${imageId}, Size: ${req.file.size} bytes`);
-    res.json({ id: imageId, url: fileUrl });
+    console.log(`[${new Date().toISOString()}] ✅ Image uploaded - ID: ${imageId}, Size: ${req.file.size} bytes, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
+    res.json({ id: imageId, url: fileUrl, thumb: thumbUrl || '' });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Upload image error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -888,47 +1012,19 @@ app.post('/api/images/save', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Invalid data URL' });
     }
 
-    const imageId = crypto.createHash('sha256').update(dataUrl).digest('hex');
-
-    const [existing] = await db.query('SELECT id, file_url, deleted_at FROM images WHERE id = ?', [imageId]);
-
-    if (existing.length > 0) {
-      // 若图片之前被软删除，则恢复
-      if (existing[0].deleted_at) {
-        await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
-        console.log(`[${new Date().toISOString()}] ♻️  Restored soft-deleted image - ID: ${imageId}`);
-      } else {
-        console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
-      }
-      return res.json({ id: imageId, url: existing[0].file_url });
-    }
-
-    const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+    const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
     if (!matches) {
       console.error(`[${new Date().toISOString()}] ❌ Invalid data URL format`);
       return res.status(400).json({ error: 'Invalid data URL format' });
     }
 
-    const ext = matches[1];
-    const base64Data = matches[2];
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    const uploadDir = process.env.IMAGE_UPLOAD_DIR || '/data/images';
-    await fs.mkdir(uploadDir, { recursive: true });
-
-    const filename = `${imageId}.${ext}`;
-    const filePath = path.join(uploadDir, filename);
-    await fs.writeFile(filePath, buffer);
-
-    const fileUrl = `${process.env.IMAGE_BASE_URL}/${filename}`;
-
-    await db.query(
-      'INSERT INTO images (id, user_id, file_path, file_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [imageId, req.session.userId, filePath, fileUrl, buffer.length, `image/${ext}`, source]
-    );
-
-    console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes`);
-    res.json({ id: imageId, url: fileUrl });
+    const result = await saveGeneratedImageBytes({
+      userId: req.session.userId,
+      buffer: Buffer.from(matches[2], 'base64'),
+      mime: matches[1],
+      source,
+    });
+    res.json(result);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Save image error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -972,4 +1068,43 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[${new Date().toISOString()}] 📝 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`[${new Date().toISOString()}] 🔗 CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
   console.log(`[${new Date().toISOString()}] 🗄️  Redis: ${redisClient ? 'connected' : 'memory session'}`);
+  // 异步触发 backfill，不阻塞 listen；首次启动数据多时也不影响接收请求
+  backfillThumbnails().catch((err) => {
+    console.error(`[${new Date().toISOString()}] ❌ Backfill thumbnails error:`, err.message);
+  });
 });
+
+// 启动时为历史图片补缩略图（thumb_url IS NULL），并发限制 4
+async function backfillThumbnails() {
+  const [rows] = await db.query(
+    "SELECT id, file_path FROM images WHERE thumb_url IS NULL AND deleted_at IS NULL"
+  );
+  if (rows.length === 0) {
+    console.log(`[${new Date().toISOString()}] 🖼️  Thumbnail backfill: nothing to do`);
+    return;
+  }
+  console.log(`[${new Date().toISOString()}] 🖼️  Backfilling ${rows.length} thumbnails...`);
+
+  const CONCURRENCY = 4;
+  let ok = 0;
+  let fail = 0;
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const batch = rows.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async (row) => {
+      try {
+        const buffer = await fs.readFile(row.file_path);
+        const { thumbPath, thumbUrl } = await writeThumbnail(buffer, row.id, path.dirname(row.file_path));
+        if (!thumbUrl) {
+          fail++;
+          return;
+        }
+        await db.query('UPDATE images SET thumb_path = ?, thumb_url = ? WHERE id = ?', [thumbPath, thumbUrl, row.id]);
+        ok++;
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] ⚠️  Backfill failed for ${row.id}: ${err.message}`);
+        fail++;
+      }
+    }));
+  }
+  console.log(`[${new Date().toISOString()}] ✅ Backfill done: ${ok} success, ${fail} failed`);
+}

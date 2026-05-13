@@ -6,15 +6,28 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 export interface CallApiOptions {
   prompt: string
   params: TaskParams
-  inputImageDataUrls: string[]
+  inputImageIds: string[]
+  /** 上游超时（秒），客户端会自动多加 10s 容差再发起 abort */
+  timeoutSec?: number
+}
+
+export interface GeneratedImage {
+  id: string
+  url: string
+  /** 缩略图 URL；缺失时为空字符串，调用方需要 fallback 到 url */
+  thumb: string
 }
 
 export interface CallApiResult {
-  images: string[]
+  images: GeneratedImage[]
 }
 
+const DEFAULT_TIMEOUT_SEC = 600
+const CLIENT_TIMEOUT_BUFFER_MS = 10_000
+
 export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult> {
-  const timeoutMs = 600 * 1000
+  const upstreamTimeoutSec = opts.timeoutSec && opts.timeoutSec > 0 ? opts.timeoutSec : DEFAULT_TIMEOUT_SEC
+  const timeoutMs = upstreamTimeoutSec * 1000 + CLIENT_TIMEOUT_BUFFER_MS
   const signal = AbortSignal.timeout(timeoutMs)
   const response = await fetch(`${API_BASE_URL}/api/generate`, {
     method: 'POST',
@@ -25,7 +38,11 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       'Cache-Control': 'no-store, no-cache, max-age=0',
       Pragma: 'no-cache',
     },
-    body: JSON.stringify(opts),
+    body: JSON.stringify({
+      prompt: opts.prompt,
+      params: opts.params,
+      inputImageIds: opts.inputImageIds,
+    }),
     signal,
   })
 

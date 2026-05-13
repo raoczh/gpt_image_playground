@@ -86,6 +86,8 @@ async function initDatabase() {
         user_id INT NOT NULL COMMENT '用户 ID',
         file_path VARCHAR(500) NOT NULL COMMENT '文件存储路径',
         file_url VARCHAR(500) NOT NULL COMMENT '访问 URL',
+        thumb_path VARCHAR(500) NULL COMMENT '缩略图存储路径',
+        thumb_url VARCHAR(500) NULL COMMENT '缩略图访问 URL',
         file_size INT NOT NULL COMMENT '文件大小 (bytes)',
         mime_type VARCHAR(50) NOT NULL COMMENT 'MIME 类型',
         source ENUM('upload', 'generated') DEFAULT 'upload' COMMENT '来源',
@@ -114,6 +116,23 @@ async function initDatabase() {
         ADD INDEX idx_deleted_at (deleted_at)
       `);
       console.log('  ✅ Added deleted_at column to images');
+    }
+
+    // 检查并添加 images 表的 thumb_path / thumb_url 字段
+    const [thumbColumns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'images' AND COLUMN_NAME = 'thumb_path'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (thumbColumns.length === 0) {
+      console.log('  📝 Adding thumb_path / thumb_url columns to images table...');
+      await connection.query(`
+        ALTER TABLE images
+        ADD COLUMN thumb_path VARCHAR(500) NULL COMMENT '缩略图存储路径' AFTER file_url,
+        ADD COLUMN thumb_url VARCHAR(500) NULL COMMENT '缩略图访问 URL' AFTER thumb_path
+      `);
+      console.log('  ✅ Added thumb_path / thumb_url columns to images');
     }
 
     // 创建用户设置表

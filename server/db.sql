@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS `images` (
   `user_id` INT NOT NULL COMMENT '用户 ID',
   `file_path` VARCHAR(500) NOT NULL COMMENT '文件存储路径',
   `file_url` VARCHAR(500) NOT NULL COMMENT '访问 URL',
+  `thumb_path` VARCHAR(500) NULL COMMENT '缩略图存储路径',
+  `thumb_url` VARCHAR(500) NULL COMMENT '缩略图访问 URL',
   `file_size` INT NOT NULL COMMENT '文件大小 (bytes)',
   `mime_type` VARCHAR(50) NOT NULL COMMENT 'MIME 类型',
   `source` ENUM('upload', 'generated') DEFAULT 'upload' COMMENT '来源',

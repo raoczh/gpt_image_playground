@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type {
   AppSettings,
   TaskParams,
@@ -10,8 +11,6 @@ import { DEFAULT_SETTINGS, DEFAULT_PARAMS } from './types'
 import {
   getAllTasks,
   putTask,
-  deleteTask as dbDeleteTask,
-  clearTasks as dbClearTasks,
   getImage,
   getAllImages,
   putImage,
@@ -45,6 +44,14 @@ export async function ensureImageCached(id: string): Promise<string | undefined>
 }
 
 // ===== Store 类型 =====
+
+export type ToastType = 'info' | 'success' | 'error'
+
+export interface ToastItem {
+  id: string
+  message: string
+  type: ToastType
+}
 
 interface AppState {
   // 用户认证
@@ -94,8 +101,9 @@ interface AppState {
   setShowSettings: (v: boolean) => void
 
   // Toast
-  toast: { message: string; type: 'info' | 'success' | 'error' } | null
+  toasts: ToastItem[]
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void
+  dismissToast: (id: string) => void
 
   // Confirm dialog
   confirmDialog: {
@@ -106,7 +114,9 @@ interface AppState {
   setConfirmDialog: (d: AppState['confirmDialog']) => void
 }
 
-export const useStore = create<AppState>()((set) => ({
+export const useStore = create<AppState>()(
+  persist(
+    (set) => ({
   // User
   user: null,
   authLoading: true,
@@ -169,18 +179,29 @@ export const useStore = create<AppState>()((set) => ({
   setShowSettings: (showSettings) => set({ showSettings }),
 
   // Toast
-  toast: null,
+  toasts: [],
   showToast: (message, type = 'info') => {
-    set({ toast: { message, type } })
+    const id = genId()
+    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
     setTimeout(() => {
-      set((s) => (s.toast?.message === message ? { toast: null } : s))
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
     }, 3000)
   },
+  dismissToast: (id) =>
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   // Confirm
   confirmDialog: null,
   setConfirmDialog: (confirmDialog) => set({ confirmDialog }),
-}))
+    }),
+    {
+      name: 'gpt-image-playground-prefs',
+      storage: createJSONStorage(() => localStorage),
+      version: 1,
+      partialize: (s) => ({ prompt: s.prompt, params: s.params }),
+    },
+  ),
+)
 
 // ===== Actions =====
 
@@ -206,7 +227,9 @@ export async function initStore() {
         params: t.params as TaskParams,
         inputImageIds: t.input_image_ids || [],
         inputImageUrls: t.input_image_urls || [],
+        inputThumbnails: t.input_thumb_urls || [],
         outputImages: t.output_image_urls || [],
+        outputThumbnails: t.output_thumb_urls || [],
         status: t.status,
         error: t.error_message || null,
         createdAt: t.started_at,
@@ -262,7 +285,7 @@ export async function submitTask() {
   }
 
   // 输入图片的 dataUrl 直接来自 store；InputImage 创建时已固化。
-  const inputImageDataUrls = inputImages.map((i) => i.dataUrl)
+  const inputImageIds = inputImages.map((i) => i.id)
 
   const taskId = genId()
   const task: TaskRecord = {
@@ -271,7 +294,9 @@ export async function submitTask() {
     params: normalizedParams,
     inputImageIds: inputImages.map((i) => i.id),
     inputImageUrls: inputImages.map((i) => i.dataUrl),
+    inputThumbnails: inputImages.map(() => ''),
     outputImages: [],
+    outputThumbnails: [],
     status: 'running',
     error: null,
     createdAt: Date.now(),
@@ -301,11 +326,11 @@ export async function submitTask() {
     }
   }
 
-  // 异步调用 API，传入已获取的 dataUrls
-  executeTask(taskId, inputImageDataUrls)
+  // 异步调用 API；服务端按 ID 读盘构造上游请求，避免重复传 base64
+  executeTask(taskId, inputImageIds)
 }
 
-async function executeTask(taskId: string, inputDataUrls: string[]) {
+async function executeTask(taskId: string, inputImageIds: string[]) {
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
 
@@ -313,24 +338,18 @@ async function executeTask(taskId: string, inputDataUrls: string[]) {
     const result = await callImageApi({
       prompt: task.prompt,
       params: task.params,
-      inputImageDataUrls: inputDataUrls,
+      inputImageIds,
+      timeoutSec: useStore.getState().settings.timeout,
     })
 
-    // 先上传图片到后端获取 URL，再用 URL 更新任务
-    const outputIds: string[] = []
-    const outputImages: string[] = []
-    for (const dataUrl of result.images) {
-      try {
-        const saved = await backendApi.saveImage(dataUrl, 'generated')
-        outputIds.push(saved.id)
-        outputImages.push(saved.url)
-      } catch (error) {
-        console.error('Failed to upload image to backend:', error)
-      }
-    }
+    // 服务端已落盘并返回 id+url+thumb，前端不再二次 POST /api/images/save
+    const outputIds = result.images.map((r) => r.id)
+    const outputImages = result.images.map((r) => r.url)
+    const outputThumbnails = result.images.map((r) => r.thumb || '')
 
     updateTaskInStore(taskId, {
       outputImages,
+      outputThumbnails,
       status: 'done',
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,

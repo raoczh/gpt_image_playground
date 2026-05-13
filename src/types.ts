@@ -63,8 +63,12 @@ export interface TaskRecord {
   inputImageIds: string[]
   /** 输入图片的 URL 列表（用于详情展示和放大预览） */
   inputImageUrls: string[]
+  /** 输入图片的缩略图 URL 列表（与 inputImageUrls 一一对应；缺失时为空串） */
+  inputThumbnails: string[]
   /** 输出图片的 URL 列表 */
   outputImages: string[]
+  /** 输出图片的缩略图 URL 列表（与 outputImages 一一对应；缺失时为空串） */
+  outputThumbnails: string[]
   status: TaskStatus
   error: string | null
   createdAt: number

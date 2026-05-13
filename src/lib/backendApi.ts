@@ -98,6 +98,8 @@ export interface Task {
   output_image_ids: string[];
   input_image_urls: string[];
   output_image_urls: string[];
+  input_thumb_urls: string[];
+  output_thumb_urls: string[];
   started_at: number;
   finished_at?: number;
   created_at: string;

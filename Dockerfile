@@ -8,6 +8,11 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 COPY package.json package-lock.json ./
 RUN npm ci
+# Workaround for npm bug #4828: optional platform-specific binaries
+# are not always installed by `npm ci` on cross-platform builds.
+# rollup native binary is required by vite build; sharp's musl binary
+# is installed via its own postinstall and is unaffected here.
+RUN npm install --no-save @rollup/rollup-linux-x64-musl
 
 COPY src ./src
 COPY public ./public

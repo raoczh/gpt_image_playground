@@ -36,10 +36,11 @@ export default function TaskCard({
     setCoverRatio('')
     setCoverSize('')
 
-    if (task.outputImages?.[0]) {
-      setThumbSrc(task.outputImages[0])
+    const src = task.outputThumbnails?.[0] || task.outputImages?.[0]
+    if (src) {
+      setThumbSrc(src)
     }
-  }, [task.outputImages])
+  }, [task.outputThumbnails, task.outputImages])
 
   useEffect(() => {
     if (!thumbSrc) return

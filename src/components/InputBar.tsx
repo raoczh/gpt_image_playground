@@ -40,7 +40,6 @@ export default function InputBar() {
   const pendingImageCount = useStore((s) => s.pendingImageCount)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
-  const setShowSettings = useStore((s) => s.setShowSettings)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
@@ -161,16 +160,25 @@ export default function InputBar() {
       const items = e.clipboardData?.items
       if (!items) return
       const imageFiles: File[] = []
+      let hasText = false
       for (const item of Array.from(items)) {
-        if (item.type.startsWith('image/')) {
+        if (item.kind === 'string' && (item.type === 'text/plain' || item.type === 'text/html')) {
+          hasText = true
+        } else if (item.type.startsWith('image/')) {
           const file = item.getAsFile()
           if (file) imageFiles.push(file)
         }
       }
-      if (imageFiles.length > 0) {
+      if (imageFiles.length === 0) return
+
+      // 同时含文本时（比如从 Office/网页混合粘贴），让浏览器把文本插入 textarea，
+      // 只单独处理图片；纯图片才阻止默认行为（避免空白光标位置改变）
+      const target = e.target as HTMLElement | null
+      const intoTextarea = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT'
+      if (!hasText || !intoTextarea) {
         e.preventDefault()
-        handleFilesRef.current(imageFiles)
       }
+      handleFilesRef.current(imageFiles)
     }
     document.addEventListener('paste', handlePaste)
     return () => document.removeEventListener('paste', handlePaste)
