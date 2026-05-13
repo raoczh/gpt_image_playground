@@ -1,28 +1,45 @@
-import { useMemo } from 'react'
-import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
+import { useEffect, useRef } from 'react'
+import { useStore, reuseConfig, editOutputs, removeTask, loadTasksFirstPage, loadMoreTasks } from '../store'
 import TaskCard from './TaskCard'
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
+  const user = useStore((s) => s.user)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
+  const tasksLoading = useStore((s) => s.tasksLoading)
+  const tasksHasMore = useStore((s) => s.tasksHasMore)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
-  const filteredTasks = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
-    const q = searchQuery.trim().toLowerCase()
-    
-    return sorted.filter((t) => {
-      const matchStatus = filterStatus === 'all' || t.status === filterStatus
-      if (!matchStatus) return false
-      
-      if (!q) return true
-      const prompt = (t.prompt || '').toLowerCase()
-      const paramStr = JSON.stringify(t.params).toLowerCase()
-      return prompt.includes(q) || paramStr.includes(q)
-    })
-  }, [tasks, searchQuery, filterStatus])
+  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus 变化时 debounce reload。
+  // 用 ref 跳过首次 effect 避免重复请求。
+  const skipFirstRef = useRef(true)
+  useEffect(() => {
+    if (!user) return
+    if (skipFirstRef.current) {
+      skipFirstRef.current = false
+      return
+    }
+    const handle = setTimeout(() => {
+      loadTasksFirstPage().catch(console.error)
+    }, 300)
+    return () => clearTimeout(handle)
+  }, [user, searchQuery, filterStatus])
+
+  // 滚动到底部时拉下一页
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (!node || !tasksHasMore) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        loadMoreTasks().catch(console.error)
+      }
+    }, { rootMargin: '300px' })
+    io.observe(node)
+    return () => io.disconnect()
+  }, [tasksHasMore])
 
   const handleDelete = (task: typeof tasks[0]) => {
     setConfirmDialog({
@@ -32,10 +49,16 @@ export default function TaskGrid() {
     })
   }
 
-  if (!filteredTasks.length) {
+  // 后端已按 created_at DESC 排序，前端不再 filter；只在显示时按 createdAt 兜底排序
+  // （submitTask unshift 的新任务可能比后端最后一条更新，需要保证它在最前面）
+  const sortedTasks = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
+
+  if (!sortedTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
-        {searchQuery ? (
+        {tasksLoading ? (
+          <p className="text-sm">加载中...</p>
+        ) : searchQuery || filterStatus !== 'all' ? (
           <p className="text-sm">没有找到匹配的记录</p>
         ) : (
           <>
@@ -60,17 +83,28 @@ export default function TaskGrid() {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {filteredTasks.map((task) => (
-        <TaskCard
-          key={task.id}
-          task={task}
-          onClick={() => setDetailTaskId(task.id)}
-          onReuse={() => reuseConfig(task)}
-          onEditOutputs={() => editOutputs(task)}
-          onDelete={() => handleDelete(task)}
-        />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {sortedTasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            onClick={() => setDetailTaskId(task.id)}
+            onReuse={() => reuseConfig(task)}
+            onEditOutputs={() => editOutputs(task)}
+            onDelete={() => handleDelete(task)}
+          />
+        ))}
+      </div>
+      {/* 底部 sentinel + 加载指示 */}
+      {tasksHasMore && (
+        <div ref={sentinelRef} className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
+          {tasksLoading ? '加载中...' : '滚动加载更多'}
+        </div>
+      )}
+      {!tasksHasMore && tasks.length > 0 && (
+        <div className="py-6 text-center text-xs text-gray-300 dark:text-gray-600">没有更多了</div>
+      )}
+    </>
   )
 }

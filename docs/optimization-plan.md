@@ -1,18 +1,16 @@
 # 优化计划
 
-> 本文档汇总了对 GPT Image Playground 项目的全局评估，按"价值/性价比"分阶段排列。  
-> 每项记录了问题位置、影响、建议方案与粗略工作量。  
-> **本轮（Phase 1）执行清单**见末尾。
+> 本文档汇总了对 GPT Image Playground 项目的全局评估与执行结果。  
+> Phase 3（细节打磨）和 Phase 4（安全加固）已主动剔除，不再跟进。
 
 ---
 
 ## 一、阶段总览
 
-| 阶段 | 内容性质 | 风险 | 是否本轮 |
+| 阶段 | 内容性质 | 风险 | 状态 |
 |---|---|---|---|
-| **Phase 1** | 小而美的 bug 修复 + 体验改进 | 低 | ✅ 本轮 |
-| **Phase 2** | 涉及前后端协议改动的中型重构 | 中 | 后续单独迭代 |
-| **Phase 3** | 锦上添花的细节打磨 | 低 | 视情况补做 |
+| **Phase 1** | 小而美的 bug 修复 + 体验改进 | 低 | ✅ 完成 |
+| **Phase 2** | 涉及前后端协议改动的中型重构 | 中 | ✅ 已完成 P2-1/2/4/5/6/7；⏸️ P2-3 留单独立项 |
 
 ---
 
@@ -145,74 +143,45 @@
 
 ---
 
-## 四、Phase 3：细节打磨
+## 四、Phase 2 后续完成情况
 
-### P3-1 键盘快捷键扩展
-- `/` 聚焦搜索框、`g` 切换网格密度、`n` 新建任务（聚焦 prompt）
+### ✅ P2-4 任务列表分页/无限滚动
 
-### P3-2 Lightbox 邻图预加载
-- [src/components/Lightbox.tsx:36-43](src/components/Lightbox.tsx#L36)
-- 进入时预加载 `index±1`
+- **位置**：[server/server.js:739](server/server.js#L739) 原 `LIMIT 1000`、[TaskGrid.tsx](src/components/TaskGrid.tsx) 原全量渲染
+- **方案**：`/api/tasks?cursor=&limit=20&q=&status=`，前端 IntersectionObserver 触发下一页
+- **改动**：
+  - 服务端 cursor = base64(JSON({ts, id}))，排序 `(created_at DESC, id DESC)`，多取 1 条判断 `hasMore`；查询条件用动态 WHERE 列表拼接，prompt LIKE 模糊匹配
+  - 响应改为 `{ items, nextCursor }`（带破坏性，前端同步改造）
+  - 前端 store 新增 `tasksCursor` / `tasksHasMore` / `tasksLoading` 状态 + `loadTasksFirstPage` / `loadMoreTasks` 两个 action；防 race 用单调递增的 sequence number
+  - `loadTasksFirstPage` 合并策略：拉新页前保留所有 `status === 'running'` 的本地任务，避免刚 submit 的任务被刷掉
+  - [TaskGrid.tsx](src/components/TaskGrid.tsx) 移除前端 filter，加底部 sentinel + IntersectionObserver；监听 (user, searchQuery, filterStatus) debounce 300ms 触发首页重载
 
-### P3-3 暗黑模式开关
-- 现在只跟系统，Header 加切换按钮 + 持久化偏好
+### ✅ P2-5 搜索/过滤搬到后端
 
-### P3-4 responses 模式下 n 输入禁用 + 工具提示
-- responses API 当前实现一次只产 1 张（[server.js:179-207](server/server.js#L179)），UI 应该禁用 n 输入并说明
+- 与 P2-4 同源实现，`/api/tasks` 接受 `q` 和 `status` query；前端不再在内存里 filter
+- 搜索框输入 debounce 300ms 后请求；状态过滤变化也走同一 debounce
+- 服务端 prompt `LIKE %q%` 模糊匹配；status 限定 enum
 
-### P3-5 a11y
-- `<img>` alt、模态焦点 trap、aria 标签
+### ✅ P2-6 物理文件清理
 
-### P3-6 Header 用户菜单简化
-- 只有"退出"一项，没必要 fixed inset-0 click outside 实现，用 `<details>` 或简单方案即可
+- **位置**：[server/server.js cleanupSoftDeleted](server/server.js)（startup + setInterval 24h）
+- **方案**：扫 `images.deleted_at < NOW() - INTERVAL 30 DAY`，unlink 原图 + 缩略图，DELETE DB 行；tasks 表同样硬删 30 天前的 soft-deleted 行
+- 失败单条跳过、记 warn 日志；不引入额外依赖（用 `setInterval`，不依赖 node-cron）
 
----
+### ✅ P2-7 错误信息友好化
 
-## 五、Phase 4：安全 / 健壮性（部署前重点关注）
+- **位置**：[server/server.js parseUpstreamError / friendlyUpstreamMessage](server/server.js)
+- **方案**：`UPSTREAM_ERROR_PATTERNS` 数组按优先级匹配（rate limit / quota / safety / size / auth / timeout / model / network），命中即替换为中文；未命中保留原文
+- `/api/generate` catch 里非业务错误（`statusCode` 未设）也走友好化，覆盖 abort/timeout/网络异常
 
-### S-1 API Key 加密存储
-- [server/server.js:629](server/server.js#L629) 明文进 DB，schema 注释写的"加密存储"是空头支票
-- 用 AES-256-GCM + KMS 或环境密钥派生
+### ⏸️ P2-3 任务状态机改为服务端权威
 
-### S-2 Rate limit
-- `/api/generate` 没限频，单个用户可以打爆配额
-- express-rate-limit 按 `req.session.userId`
-
-### S-3 CSRF 保护
-- session cookie sameSite=lax 防大部分场景，对公开服务需 CSRF token 或 Origin/Referer 严校验
-
-### S-4 上传文件类型校验
-- [server.js:417-424](server/server.js#L417) 信任 client 的 `mimetype`
-- 用 `file-type` 读 magic bytes
-
-### S-5 SQL 日志泄漏
-- 部分日志带 prompt 内容 ([server.js:706](server/server.js#L706))，生产环境可能要脱敏
+- **未做**：工作量 1-2 天，涉及任务流范式变化（前端发起 → 服务端权威 + 轮询/SSE）
+- **后续**：需独立立项 + 单独 PR
 
 ---
 
-## 六、本轮选定执行：Phase 1 全部 6 项
-
-**理由**：
-
-- 6 项都是 1.5 小时内能完工的小改动
-- 全部低风险、互不依赖、可独立验证
-- 用户立刻能感知（特别是 prompt 持久化、Toast 队列、粘贴修复）
-- 同时修复 2 个真实 bug（n 参数、超时不一致）
-
-**Phase 2 / 3 / 4 的大改动留作后续单独立项**，每项都值得独立的 plan + PR，避免本次"一把梭"把代码改得不可控。
-
-执行顺序：
-1. P1-1 n 参数（最快，先修明显 bug）
-2. P1-2 超时一致化
-3. P1-6 粘贴修复
-4. P1-5 Toast 队列（中等工作量）
-5. P1-3 + P1-4 持久化（一起做）
-
-每完成一项跑一次 `npx tsc --noEmit`。
-
----
-
-## 七、Phase 1 执行结果（同步）
+## 五、Phase 1 执行结果
 
 **状态**：✅ 全部完成，`npx tsc --noEmit` 通过
 
@@ -235,10 +204,12 @@
 |---|---|---|
 | P2-1 image IDs | ✅ | 客户端只发 ID，服务端按 ID 读盘构造上游请求；`/api/generate` 直接落盘返回 `{id,url}`；省两次 base64 往返 |
 | P2-2 服务端缩略图 | ✅ | 引入 sharp，落盘原图同步生成 256px webp 缩略图；DB 加 `thumb_path`/`thumb_url`；`/api/tasks` 同时返回缩略图 URL；启动时 backfill 历史图（并发 4）；前端列表/输入图小图优先用缩略图，Lightbox/详情大图用原图 |
+| P2-4 任务列表分页 | ✅ | `/api/tasks?cursor=&limit=20`，cursor 基于 (created_at, id) base64 编码；前端 IntersectionObserver 触发下一页；首页重载保留本地 running 任务 |
+| P2-5 搜索过滤后端化 | ✅ | `q` 走 prompt LIKE，`status` 过滤；前端 debounce 300ms 触发；TaskGrid 移除前端 filter |
+| P2-6 物理文件清理 | ✅ | 启动 + 每 24h 扫 `deleted_at > 30d` 的 images 与 tasks，硬删并 unlink 原图/缩略图 |
+| P2-7 错误信息友好化 | ✅ | parseUpstreamError + `/api/generate` catch 走 `friendlyUpstreamMessage`，覆盖限流/额度/安全/尺寸/鉴权/超时/模型/网络 8 类 |
+| P2-3 任务状态机服务端权威 | ⏸️ | 工作量 1-2 天，留单独立项 |
 
 **后续建议下一轮**：
 
-- **P2-3** ⭐⭐ 任务状态机改为服务端权威（最有价值，但工作量 1-2 天，需独立立项）
-- **P2-7** 错误信息友好化（30 分钟，性价比高）
-- **P2-6** 物理文件清理（1 小时，避免磁盘膨胀）
-- **P2-4 + P2-5** 任务列表分页 + 搜索后端化（捆绑做，~半天）
+- **P2-3** ⭐⭐ 任务状态机改为服务端权威（剩余唯一中型项，1-2 天，需独立立项）

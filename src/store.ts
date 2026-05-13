@@ -84,6 +84,12 @@ interface AppState {
   // 任务列表
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
+  /** 下一页 cursor；null 表示没有更多 */
+  tasksCursor: string | null
+  /** 是否还有下一页 */
+  tasksHasMore: boolean
+  /** 正在请求列表（首次或追加） */
+  tasksLoading: boolean
 
   // 搜索和筛选
   searchQuery: string
@@ -161,6 +167,9 @@ export const useStore = create<AppState>()(
   // Tasks
   tasks: [],
   setTasks: (tasks) => set({ tasks }),
+  tasksCursor: null,
+  tasksHasMore: false,
+  tasksLoading: false,
 
   // Search & Filter
   searchQuery: '',
@@ -212,40 +221,11 @@ function genId(): string {
 
 /** 初始化：从后端或 IndexedDB 加载任务和图片缓存，清理孤立图片 */
 export async function initStore() {
-  const { user } = useStore.getState()
-
-  let tasks: TaskRecord[] = []
-
-  // 如果用户已登录，从后端加载任务
-  if (user) {
-    try {
-      const backendTasks = await backendApi.getTasks()
-      // 转换后端任务格式为前端格式
-      tasks = backendTasks.map((t): TaskRecord => ({
-        id: t.id,
-        prompt: t.prompt,
-        params: t.params as TaskParams,
-        inputImageIds: t.input_image_ids || [],
-        inputImageUrls: t.input_image_urls || [],
-        inputThumbnails: t.input_thumb_urls || [],
-        outputImages: t.output_image_urls || [],
-        outputThumbnails: t.output_thumb_urls || [],
-        status: t.status,
-        error: t.error_message || null,
-        createdAt: t.started_at,
-        finishedAt: t.finished_at || null,
-        elapsed: t.finished_at ? t.finished_at - t.started_at : null,
-      }))
-    } catch (error) {
-      console.error('Failed to load tasks from backend:', error)
-    }
-  }
-
-  useStore.getState().setTasks(tasks)
+  await loadTasksFirstPage()
 
   // 收集所有任务引用的图片 id
   const referencedIds = new Set<string>()
-  for (const t of tasks) {
+  for (const t of useStore.getState().tasks) {
     for (const id of t.inputImageIds || []) referencedIds.add(id)
     for (const id of t.outputImages || []) referencedIds.add(id)
   }
@@ -258,6 +238,80 @@ export async function initStore() {
     } else {
       await deleteImage(img.id)
     }
+  }
+}
+
+// 把后端 Task 转成前端 TaskRecord
+function toTaskRecord(t: backendApi.Task): TaskRecord {
+  return {
+    id: t.id,
+    prompt: t.prompt,
+    params: t.params as TaskParams,
+    inputImageIds: t.input_image_ids || [],
+    inputImageUrls: t.input_image_urls || [],
+    inputThumbnails: t.input_thumb_urls || [],
+    outputImages: t.output_image_urls || [],
+    outputThumbnails: t.output_thumb_urls || [],
+    status: t.status,
+    error: t.error_message || null,
+    createdAt: t.started_at,
+    finishedAt: t.finished_at || null,
+    elapsed: t.finished_at ? t.finished_at - t.started_at : null,
+  }
+}
+
+// 防 race：每次发起请求自增；回来后若不是最新请求则丢弃结果
+let currentLoadSeq = 0
+
+/** 拉第一页任务（重置 cursor）。搜索 / 过滤变化时调。已运行中的任务会保留在最前面，避免刚提交的 task 被刷掉。 */
+export async function loadTasksFirstPage() {
+  const { user, searchQuery, filterStatus } = useStore.getState()
+  if (!user) {
+    useStore.setState({ tasks: [], tasksCursor: null, tasksHasMore: false })
+    return
+  }
+  const mySeq = ++currentLoadSeq
+  useStore.setState({ tasksLoading: true })
+  try {
+    const page = await backendApi.getTasks({ q: searchQuery, status: filterStatus })
+    if (mySeq !== currentLoadSeq) return // 已被更新请求覆盖
+    const items = page.items.map(toTaskRecord)
+    const runningTasks = useStore.getState().tasks.filter((t) => t.status === 'running')
+    const runningIds = new Set(runningTasks.map((t) => t.id))
+    const merged = [...runningTasks, ...items.filter((t) => !runningIds.has(t.id))]
+    useStore.setState({
+      tasks: merged,
+      tasksCursor: page.nextCursor,
+      tasksHasMore: !!page.nextCursor,
+    })
+  } catch (err) {
+    if (mySeq === currentLoadSeq) {
+      console.error('Failed to load tasks:', err)
+    }
+  } finally {
+    if (mySeq === currentLoadSeq) {
+      useStore.setState({ tasksLoading: false })
+    }
+  }
+}
+
+/** 追加下一页。由滚动到底部触发，幂等。 */
+export async function loadMoreTasks() {
+  const { user, searchQuery, filterStatus, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
+  if (!user || tasksLoading || !tasksHasMore || !tasksCursor) return
+  useStore.setState({ tasksLoading: true })
+  try {
+    const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus })
+    const items = page.items.map(toTaskRecord)
+    useStore.setState((s) => ({
+      tasks: [...s.tasks, ...items.filter((t) => !s.tasks.find((x) => x.id === t.id))],
+      tasksCursor: page.nextCursor,
+      tasksHasMore: !!page.nextCursor,
+    }))
+  } catch (err) {
+    console.error('Failed to load more tasks:', err)
+  } finally {
+    useStore.setState({ tasksLoading: false })
   }
 }
 
@@ -515,6 +569,7 @@ export async function clearAllData() {
   await clearImages()
   imageCache.clear()
   setTasks([])
+  useStore.setState({ tasksCursor: null, tasksHasMore: false })
   clearInputImages()
   setSettings({ ...DEFAULT_SETTINGS })
   setParams({ ...DEFAULT_PARAMS })

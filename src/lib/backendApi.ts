@@ -106,8 +106,26 @@ export interface Task {
   updated_at: string;
 }
 
-export async function getTasks(): Promise<Task[]> {
-  return apiRequest('/api/tasks');
+export interface TasksPage {
+  items: Task[];
+  nextCursor: string | null;
+}
+
+export interface GetTasksOpts {
+  cursor?: string | null;
+  limit?: number;
+  q?: string;
+  status?: 'all' | 'running' | 'done' | 'error';
+}
+
+export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
+  const params = new URLSearchParams();
+  if (opts.cursor) params.set('cursor', opts.cursor);
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.q) params.set('q', opts.q);
+  if (opts.status && opts.status !== 'all') params.set('status', opts.status);
+  const query = params.toString();
+  return apiRequest(query ? `/api/tasks?${query}` : '/api/tasks');
 }
 
 export async function createTask(task: {

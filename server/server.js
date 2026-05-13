@@ -133,6 +133,28 @@ async function loadUserApiSettings(userId) {
   return resolveApiSettings(rows[0]);
 }
 
+// 上游错误信息 → 中文友好提示的关键词映射。顺序优先：先专业再泛化。
+// 命中即返回；未命中保留原文兜底，避免信息丢失。
+const UPSTREAM_ERROR_PATTERNS = [
+  { re: /rate[\s_-]?limit|too many requests|429/i, msg: '请求过于频繁，请稍后再试（已触发上游限流）' },
+  { re: /quota|insufficient|billing|payment|credit/i, msg: '账户额度不足或计费异常，请检查 API Key 余额' },
+  { re: /safety|moderation|content[\s_-]?policy|blocked|filtered/i, msg: '内容被上游安全策略拒绝，请调整提示词或参考图后重试' },
+  { re: /invalid[\s_-]?(size|dimension)|unsupported[\s_-]?size/i, msg: '尺寸不被上游支持，请在设置中改用支持的 size' },
+  { re: /invalid[\s_-]?(api[\s_-]?key|authentication|token)|unauthorized|401/i, msg: 'API Key 无效或未授权，请在设置中检查' },
+  { re: /timeout|timed?[\s_-]?out|ETIMEDOUT/i, msg: '上游响应超时，可在设置中调高超时时间后重试' },
+  { re: /model[\s_-]?(not[\s_-]?found|unavailable|deprecated)/i, msg: '上游模型不可用，请在设置中检查 model 配置' },
+  { re: /network|ECONNRESET|ECONNREFUSED|EAI_AGAIN/i, msg: '网络异常，无法连接上游服务，请稍后重试' },
+];
+
+function friendlyUpstreamMessage(raw) {
+  if (!raw) return '上游请求失败';
+  const text = String(raw);
+  for (const { re, msg } of UPSTREAM_ERROR_PATTERNS) {
+    if (re.test(text)) return msg;
+  }
+  return text;
+}
+
 async function parseUpstreamError(response) {
   let errorMsg = `HTTP ${response.status}`;
   try {
@@ -147,7 +169,7 @@ async function parseUpstreamError(response) {
       /* ignore */
     }
   }
-  throw new Error(errorMsg);
+  throw new Error(friendlyUpstreamMessage(errorMsg));
 }
 
 // 把生成/上传的图片字节写入磁盘并落库；与客户端 hashDataUrl 保持一致：sha256("data:${mime};base64,${b64}")。
@@ -740,16 +762,55 @@ app.post('/api/settings', requireAuth, async (req, res) => {
 
 app.get('/api/tasks', requireAuth, async (req, res) => {
   try {
-    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User ID: ${req.session.userId}`);
-    const [rows] = await db.query(
-      'SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1000',
-      [req.session.userId]
-    );
+    // 分页：cursor 是上一页最后一条 (created_at, id) 的 base64 JSON；首页留空
+    // 过滤：q 模糊匹配 prompt（前后 %）；status 取 'all' | 'running' | 'done' | 'error'
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const status = ['running', 'done', 'error'].includes(req.query.status) ? req.query.status : 'all';
 
-    console.log(`[${new Date().toISOString()}] 📊 Found ${rows.length} tasks`);
+    let cursorTs = null;
+    let cursorId = null;
+    if (req.query.cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(String(req.query.cursor), 'base64').toString('utf8'));
+        if (decoded && decoded.ts && decoded.id) {
+          cursorTs = new Date(decoded.ts);
+          cursorId = String(decoded.id);
+        }
+      } catch {
+        return res.status(400).json({ error: 'Invalid cursor' });
+      }
+    }
+
+    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
+
+    const where = ['user_id = ?', 'deleted_at IS NULL'];
+    const params = [req.session.userId];
+    if (status !== 'all') {
+      where.push('status = ?');
+      params.push(status);
+    }
+    if (q) {
+      where.push('prompt LIKE ?');
+      params.push(`%${q}%`);
+    }
+    if (cursorTs && cursorId) {
+      // 严格小于上一页最后一条的 (created_at, id)
+      where.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      params.push(cursorTs, cursorTs, cursorId);
+    }
+
+    // 多取 1 条用于判断是否还有下一页
+    const sql = `SELECT * FROM tasks WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    const [rows] = await db.query(sql, [...params, limit + 1]);
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    console.log(`[${new Date().toISOString()}] 📊 Found ${pageRows.length} tasks (hasMore=${hasMore})`);
 
     // 一次性收集所有任务引用的图片 ID（输入 + 输出），批量查询 URL
-    const parsedRows = rows.map(task => {
+    const parsedRows = pageRows.map(task => {
       const inputImageIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids;
       const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
       return { task, inputImageIds: inputImageIds || [], outputImageIds: outputImageIds || [] };
@@ -770,7 +831,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       for (const img of images) imageMap.set(img.id, { url: img.file_url, thumb: img.thumb_url || '' });
     }
 
-    const tasks = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
+    const items = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
       // 保留占位（缺失填空串），保证与 ID 数组的索引一一对应
       const inputImageUrls = inputImageIds.map(id => imageMap.get(id)?.url || '');
       const outputImageUrls = outputImageIds.map(id => imageMap.get(id)?.url || '');
@@ -789,7 +850,13 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       };
     });
 
-    res.json(tasks);
+    let nextCursor = null;
+    if (hasMore && items.length > 0) {
+      const last = pageRows[pageRows.length - 1];
+      nextCursor = Buffer.from(JSON.stringify({ ts: new Date(last.created_at).toISOString(), id: last.id })).toString('base64');
+    }
+
+    res.json({ items, nextCursor });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Get tasks error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -949,7 +1016,9 @@ app.post('/api/generate', requireAuth, async (req, res) => {
       response: error.response?.data
     });
     const status = error.statusCode || error.response?.status || 500;
-    const message = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Generate failed';
+    const rawMessage = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Generate failed';
+    // statusCode 是我们自己抛的业务错误（如参考图缺失），直接透传；其余走友好化（含 abort/timeout/network）
+    const message = error.statusCode ? rawMessage : friendlyUpstreamMessage(rawMessage);
     res.status(status).json({ error: message });
   }
 });
@@ -1072,6 +1141,15 @@ app.listen(PORT, '0.0.0.0', () => {
   backfillThumbnails().catch((err) => {
     console.error(`[${new Date().toISOString()}] ❌ Backfill thumbnails error:`, err.message);
   });
+  // 启动时清理一次过期软删除文件，并每 24h 重复
+  cleanupSoftDeleted().catch((err) => {
+    console.error(`[${new Date().toISOString()}] ❌ Cleanup soft-deleted error:`, err.message);
+  });
+  setInterval(() => {
+    cleanupSoftDeleted().catch((err) => {
+      console.error(`[${new Date().toISOString()}] ❌ Cleanup soft-deleted error:`, err.message);
+    });
+  }, CLEANUP_INTERVAL_MS);
 });
 
 // 启动时为历史图片补缩略图（thumb_url IS NULL），并发限制 4
@@ -1107,4 +1185,45 @@ async function backfillThumbnails() {
     }));
   }
   console.log(`[${new Date().toISOString()}] ✅ Backfill done: ${ok} success, ${fail} failed`);
+}
+
+// 物理清理：把 deleted_at 超过 SOFT_DELETE_RETAIN_DAYS 天的 images 行真正删除并清磁盘文件，
+// 同时硬删过期的 tasks 行。失败单条跳过、记日志，不抛错（被定时器 catch 即可）。
+const SOFT_DELETE_RETAIN_DAYS = 30;
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function cleanupSoftDeleted() {
+  // 1) 物理清理图片
+  const [imgRows] = await db.query(
+    'SELECT id, file_path, thumb_path FROM images WHERE deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)',
+    [SOFT_DELETE_RETAIN_DAYS]
+  );
+  if (imgRows.length === 0) {
+    console.log(`[${new Date().toISOString()}] 🧹 Image cleanup: nothing to do`);
+  } else {
+    console.log(`[${new Date().toISOString()}] 🧹 Purging ${imgRows.length} images soft-deleted > ${SOFT_DELETE_RETAIN_DAYS}d...`);
+    let ok = 0;
+    let fail = 0;
+    for (const row of imgRows) {
+      try {
+        await fs.unlink(row.file_path).catch(() => {});
+        if (row.thumb_path) await fs.unlink(row.thumb_path).catch(() => {});
+        await db.query('DELETE FROM images WHERE id = ?', [row.id]);
+        ok++;
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] ⚠️  Image purge failed for ${row.id}: ${err.message}`);
+        fail++;
+      }
+    }
+    console.log(`[${new Date().toISOString()}] ✅ Image purge done: ${ok} purged, ${fail} failed`);
+  }
+
+  // 2) 硬删过期任务行（无物理文件，单条 SQL）
+  const [taskResult] = await db.query(
+    'DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)',
+    [SOFT_DELETE_RETAIN_DAYS]
+  );
+  if (taskResult.affectedRows > 0) {
+    console.log(`[${new Date().toISOString()}] 🧹 Purged ${taskResult.affectedRows} task rows soft-deleted > ${SOFT_DELETE_RETAIN_DAYS}d`);
+  }
 }
