@@ -51,10 +51,10 @@
 
 | 阶段 | 内容 | 风险 | 后端依赖 | 状态 |
 |---|---|---|---|---|
-| **Phase U1** | 纯新增前端功能：蒙版编辑器、fal.ai provider、iOS 修复、通用组件 | 低 | 无 | ⏳ |
-| **Phase U2** | 前端大改造但无后端依赖：@mention、API Profiles、Responses API 保护 | 中 | 无 | ⏳ |
-| **Phase U3** | 后端配合实现：批量操作、收藏、参数追踪 | 中 | 需扩 schema 和 API | ⏳ |
-| **Phase U4** | 性能与体验细节：缩略图相关已做（见 P2-2），剩余的图片缓存控制、详情解码优化 | 低 | 无 | ⏳ |
+| **Phase U1** | 纯新增前端功能：蒙版编辑器、fal.ai provider、iOS 修复、通用组件 | 低 | 无 | ✅ |
+| **Phase U2** | 前端大改造但无后端依赖：@mention、API Profiles、Responses API 保护 | 中 | 无 | 🟡 (U2-1 未做) |
+| **Phase U3** | 后端配合实现：批量操作、收藏、参数追踪 | 中 | 需扩 schema 和 API | 🟡 (U3-3 可选未做) |
+| **Phase U4** | 性能与体验细节：缩略图相关已做（见 P2-2），剩余的图片缓存控制、详情解码优化 | 低 | 无 | ✅ |
 
 ---
 
@@ -280,18 +280,37 @@ git merge main
 
 | 项 | 阶段 | 状态 | 完成时间 | 关键 commit |
 |---|---|---|---|---|
-| U1-1 蒙版编辑器 | U1 | ⏳ | — | — |
-| U1-2 fal.ai provider | U1 | ⏳ | — | — |
-| U1-3 通用组件库 | U1 | ⏳ | — | — |
-| U1-4 iOS / PWA 修复 | U1 | ⏳ | — | — |
-| U1-5 参考图拖拽排序 | U1 | ⏳ | — | — |
-| U2-1 @mention 图片引用 | U2 | ⏳ | — | — |
-| U2-2 API Profiles 多 provider | U2 | ⏳ | — | — |
-| U2-3 Responses API 防护 | U2 | ⏳ | — | — |
-| U3-1 批量操作 | U3 | ⏳ | — | — |
-| U3-2 收藏 | U3 | ⏳ | — | — |
-| U3-3 参数变更链 | U3 | ⏳ | — | — |
-| U4-1 图片缓存上限 | U4 | ⏳ | — | — |
-| U4-2 详情避免完整解码 | U4 | ⏳ | — | — |
-| U4-3 Lightbox 过期图防护 | U4 | ⏳ | — | — |
-| U4-4 模态背景虚化 | U4 | ⏳ | — | — |
+| U1-1 蒙版编辑器 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-1 蒙版编辑器` |
+| U1-2 fal.ai provider | U1 | ✅ | 2026-05-17 | 合并到 U1-2+U2-2 后端基础 / 前端 profile UI |
+| U1-3 通用组件库 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-3 cherry-pick 通用组件库` |
+| U1-4 iOS / PWA 修复 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-4 iOS / PWA 修复` |
+| U1-5 参考图拖拽排序 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-5 支持拖拽排序参考图` |
+| U2-1 @mention 图片引用 | U2 | ⏳ | — | 工作量过大（InputBar 重写为 contentEditable），留待后续 |
+| U2-2 API Profiles 多 provider | U2 | ✅ | 2026-05-17 | `feat(upstream): U1-2+U2-2 后端基础` / `feat(upstream): U1-2+U2-2 前端` |
+| U2-3 Responses API 防护 | U2 | ✅ | 2026-05-17 | `feat(upstream): U2-3 Responses API prompt 加防护前缀` |
+| U3-1 批量操作 | U3 | ✅ | 2026-05-17 | `feat(upstream): U3-1 任务批量删除` |
+| U3-2 收藏 | U3 | ✅ | 2026-05-17 | `feat(upstream): U3-2 收藏功能` |
+| U3-3 参数变更链 | U3 | ⏳ | — | 可选项，未做（计划本身标为可选） |
+| U4-1 图片缓存上限 | U4 | ✅ | 2026-05-17 | `feat(upstream): U4-1 imageCache 加 LRU 上限 100 张` |
+| U4-2 详情避免完整解码 | U4 | ✅ | 2026-05-17 | `feat(upstream): U4-2 DetailModal 预览优先用缩略图` |
+| U4-3 Lightbox 过期图防护 | U4 | ✅ | 2026-05-17 | 本分支 Lightbox 同步赋值无异步竞态，自然不适用（已确认） |
+| U4-4 模态背景虚化 | U4 | ✅ | 2026-05-17 | 本分支已有 backdrop-blur，无需补 |
+
+---
+
+## 十三、当前遗留与下一步
+
+**已完成（13/15）：** U1-1/U1-2/U1-3/U1-4/U1-5、U2-2/U2-3、U3-1/U3-2、U4-1/U4-2/U4-3/U4-4
+
+**未完成（2/15）：**
+- **U2-1 @mention 图片引用** — 需要把 InputBar 从 textarea 改为 contentEditable，移植 [src/lib/promptImageMentions.ts](../src/lib/promptImageMentions.ts) 解析逻辑。还需要决策"@图N" 在本分支语义（@当前 inputImages 还是 @历史图片库），并新增"从图片库选图"UI 入口。预估 2-3 天。
+- **U3-3 参数变更链（可选）** — DB 加 `parent_task_id`，前端 DetailModal 加变更链面板。功能价值需用户确认后再启动。预估 2 天。
+
+**下一步建议：**
+1. 先做正式的 `git merge main`，按"实现完成后的合并策略"表逐文件解决冲突。已实现的功能直接 take ours，纯新增文件 take theirs。预计还会有 InputBar / store / SettingsModal 等核心文件的冲突需要手工合并取舍。
+2. U2-1 / U3-3 等合并完成后再单独处理。
+
+**注意事项（已知简化）：**
+- 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑暂未实现（落到 `callOpenAIImageApi` 兜底）。需要单独补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析。
+- fal.ai 走最小 HTTP 路径（POST `https://fal.run/<model>`），未引入 `@fal-ai/client` SDK 也未实现异步 queue/poll；同步模型够用，复杂的 `falRequestId` 恢复机制留给后续。
+- API Profile 增加了 `user_api_profiles` 和 `user_custom_providers` 两张表，旧 `user_settings` 表保留作为兼容回退。第一次访问 `/api/profiles` 时自动迁移一条默认 profile。
