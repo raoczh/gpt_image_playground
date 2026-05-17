@@ -15,6 +15,8 @@ export interface CallApiOptions {
   maskDataUrl?: string
   /** 蒙版目标图 ID，用于校验 mask 与目标图属于同一张参考图 */
   maskTargetImageId?: string
+  /** 使用的 API Profile ID；缺省时后端取默认 profile */
+  profileId?: string
 }
 
 export interface GeneratedImage {
@@ -51,6 +53,7 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       taskId: opts.taskId,
       maskDataUrl: opts.maskDataUrl,
       maskTargetImageId: opts.maskTargetImageId,
+      profileId: opts.profileId,
     }),
     signal,
   })

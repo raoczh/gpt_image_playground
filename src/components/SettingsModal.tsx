@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { normalizeBaseUrl } from '../lib/api'
-import { useStore, exportData, importData, clearAllData } from '../store'
+import { useStore, exportData, importData, clearAllData, loadProfiles } from '../store'
 import { DEFAULT_SETTINGS, type AppSettings, type ApiFormat } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import * as backendApi from '../lib/backendApi'
+
+const PROVIDER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'openai', label: 'OpenAI 兼容' },
+  { value: 'fal', label: 'fal.ai' },
+]
 
 export default function SettingsModal() {
   const user = useStore((s) => s.user)
@@ -12,47 +17,63 @@ export default function SettingsModal() {
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const profiles = useStore((s) => s.profiles)
+  const activeProfileId = useStore((s) => s.activeProfileId)
+  const setActiveProfileId = useStore((s) => s.setActiveProfileId)
+  const customProviders = useStore((s) => s.customProviders)
+  const showToast = useStore((s) => s.showToast)
   const importInputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState<AppSettings>(settings)
   const [timeoutInput, setTimeoutInput] = useState(String(settings.timeout))
   const [showApiKey, setShowApiKey] = useState(false)
-  const [useDefault, setUseDefault] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [apiKeyChanged, setApiKeyChanged] = useState(false) // 追踪 API Key 是否被修改
+  const [apiKeyChanged, setApiKeyChanged] = useState(false)
+  const [draftProfileName, setDraftProfileName] = useState('')
+  const [draftProvider, setDraftProvider] = useState<string>('openai')
+
+  const allProviderOptions = [
+    ...PROVIDER_OPTIONS,
+    ...customProviders.map((cp) => ({ value: cp.id, label: `自定义: ${cp.name}` })),
+  ]
+
+  const switchToProfile = useCallback((profileId: string) => {
+    const profile = useStore.getState().profiles.find((p) => p.id === profileId)
+    if (!profile) return
+    setActiveProfileId(profile.id)
+    setDraftProfileName(profile.name)
+    setDraftProvider(profile.provider)
+    const nextDraft: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      baseUrl: profile.baseUrl,
+      apiKey: '',
+      model: profile.model,
+      timeout: profile.timeout,
+      apiFormat: profile.apiFormat,
+    }
+    setDraft(nextDraft)
+    setTimeoutInput(String(profile.timeout))
+    setSettings(nextDraft)
+    setApiKeyChanged(false)
+  }, [setActiveProfileId, setSettings])
 
   useEffect(() => {
     if (!showSettings) return
+    if (!user) return
 
-    const currentSettings = useStore.getState().settings
-    setDraft(currentSettings)
-    setTimeoutInput(String(currentSettings.timeout))
-
-    if (user) {
-      setLoading(true)
-      backendApi.getSettings()
-        .then((backendSettings) => {
-          setUseDefault(backendSettings.use_default)
-          const mergedSettings = {
-            ...currentSettings,
-            baseUrl: backendSettings.api_url || '',
-            apiKey: backendSettings.api_key || '', // 这里是掩码
-            model: backendSettings.settings?.model || currentSettings.model,
-            timeout: backendSettings.settings?.timeout || currentSettings.timeout,
-            apiFormat: backendSettings.settings?.apiFormat || currentSettings.apiFormat,
-          }
-          setDraft(mergedSettings)
-          setTimeoutInput(String(mergedSettings.timeout))
-          setSettings(mergedSettings)
-          setApiKeyChanged(false) // 重置修改标记
-        })
-        .catch((error) => {
-          console.error('Failed to load settings:', error)
-        })
-        .finally(() => {
-          setLoading(false)
-        })
-    }
-  }, [showSettings, user, setSettings])
+    setLoading(true)
+    loadProfiles()
+      .then(() => {
+        const { profiles: list, activeProfileId: activeId } = useStore.getState()
+        const target = list.find((p) => p.id === activeId) || list[0]
+        if (target) switchToProfile(target.id)
+      })
+      .catch((error) => {
+        console.error('Failed to load profiles:', error)
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }, [showSettings, user, switchToProfile])
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedDraft = {
@@ -66,7 +87,85 @@ export default function SettingsModal() {
     setSettings(normalizedDraft)
   }
 
-  const handleClose = () => {
+  const saveCurrentProfile = async () => {
+    if (!user || !activeProfileId) return
+    const payload: Parameters<typeof backendApi.updateProfile>[1] = {
+      name: draftProfileName.trim() || '未命名',
+      provider: draftProvider,
+      base_url: draft.baseUrl,
+      model: draft.model,
+      timeout: draft.timeout,
+      api_format: draft.apiFormat,
+    }
+    if (apiKeyChanged) payload.api_key = draft.apiKey
+    try {
+      await backendApi.updateProfile(activeProfileId, payload)
+      await loadProfiles()
+      setApiKeyChanged(false)
+    } catch (error) {
+      console.error('Failed to save profile:', error)
+      showToast('保存配置失败', 'error')
+    }
+  }
+
+  const createNewProfile = async () => {
+    if (!user) return
+    try {
+      const res = await backendApi.createProfile({
+        name: `Profile ${profiles.length + 1}`,
+        provider: 'openai',
+        base_url: '',
+        api_key: '',
+        model: 'gpt-image-1',
+        timeout: 600,
+        api_format: 'responses',
+      })
+      await loadProfiles()
+      switchToProfile(res.id)
+      showToast('已创建新 Profile', 'success')
+    } catch (error) {
+      console.error('Failed to create profile:', error)
+      showToast('创建 Profile 失败', 'error')
+    }
+  }
+
+  const deleteCurrentProfile = async () => {
+    if (!user || !activeProfileId) return
+    if (profiles.length <= 1) {
+      showToast('至少保留一个 Profile', 'error')
+      return
+    }
+    setConfirmDialog({
+      title: '删除 Profile',
+      message: `确定删除「${draftProfileName}」吗？该配置将被永久移除。`,
+      action: async () => {
+        try {
+          await backendApi.deleteProfile(activeProfileId)
+          await loadProfiles()
+          const next = useStore.getState().profiles[0]
+          if (next) switchToProfile(next.id)
+          showToast('Profile 已删除', 'success')
+        } catch (error) {
+          console.error('Failed to delete profile:', error)
+          showToast('删除 Profile 失败', 'error')
+        }
+      },
+    })
+  }
+
+  const setAsDefault = async () => {
+    if (!user || !activeProfileId) return
+    try {
+      await backendApi.setDefaultProfile(activeProfileId)
+      await loadProfiles()
+      showToast('已设为默认', 'success')
+    } catch (error) {
+      console.error('Failed to set default profile:', error)
+      showToast('设为默认失败', 'error')
+    }
+  }
+
+  const handleClose = async () => {
     const nextTimeout = Number(timeoutInput)
     const finalSettings = {
       ...draft,
@@ -76,32 +175,7 @@ export default function SettingsModal() {
           : nextTimeout,
     }
     commitSettings(finalSettings)
-
-    // 如果用户已登录，保存到后端
-    if (user) {
-      const updatePayload: any = {
-        use_default: useDefault,
-        settings: {
-          model: finalSettings.model,
-          timeout: finalSettings.timeout,
-          apiFormat: finalSettings.apiFormat,
-        },
-      }
-
-      // 只有在不使用默认配置时才发送 URL 和 Key
-      if (!useDefault) {
-        updatePayload.api_url = finalSettings.baseUrl
-        // 只有在 API Key 被修改过时才发送
-        if (apiKeyChanged) {
-          updatePayload.api_key = finalSettings.apiKey
-        }
-      }
-
-      backendApi.updateSettings(updatePayload).catch((error) => {
-        console.error('Failed to save settings:', error)
-      })
-    }
-
+    await saveCurrentProfile()
     setShowSettings(false)
   }
 
@@ -164,21 +238,55 @@ export default function SettingsModal() {
             </h4>
             <div className="space-y-4">
               {user && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useDefault}
-                    onChange={(e) => setUseDefault(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500 dark:border-white/[0.08] dark:bg-white/[0.03]"
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">使用默认配置</span>
-                  {loading && (
-                    <svg className="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  )}
-                </label>
+                <div className="rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Profile</span>
+                    <select
+                      value={activeProfileId || ''}
+                      onChange={(e) => switchToProfile(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-200/70 bg-white/60 px-2 py-1 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+                    >
+                      {profiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}{p.isDefault ? ' (默认)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {loading && (
+                      <svg className="animate-spin h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <input
+                      type="text"
+                      value={draftProfileName}
+                      onChange={(e) => setDraftProfileName(e.target.value)}
+                      placeholder="Profile 名称"
+                      className="flex-1 rounded-lg border border-gray-200/70 bg-white/60 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+                    />
+                    <button type="button" onClick={createNewProfile} className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition">+ 新建</button>
+                    <button type="button" onClick={setAsDefault} className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition">设默认</button>
+                    <button type="button" onClick={deleteCurrentProfile} className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:text-red-400 transition">删除</button>
+                  </div>
+                  <label className="block">
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Provider</span>
+                    <select
+                      value={draftProvider}
+                      onChange={(e) => setDraftProvider(e.target.value)}
+                      className="w-full rounded-lg border border-gray-200/70 bg-white/60 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+                    >
+                      {allProviderOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    {draftProvider !== 'openai' && draftProvider !== 'fal' && (
+                      <div className="mt-1 text-[10px] text-amber-500 dark:text-amber-400">自定义 HTTP provider 当前后端暂未实现请求构造，回退到 OpenAI 兼容</div>
+                    )}
+                  </label>
+                </div>
               )}
 
               <label className="block">
@@ -191,7 +299,7 @@ export default function SettingsModal() {
                     setDraft(nextDraft)
                     commitSettings(nextDraft)
                   }}
-                  disabled={useDefault}
+                  disabled={draftProvider !== 'openai'}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="imagen">Images API (imagen)</option>
@@ -212,11 +320,10 @@ export default function SettingsModal() {
                   onBlur={(e) => commitSettings({ ...draft, baseUrl: e.target.value })}
                   type="text"
                   placeholder={DEFAULT_SETTINGS.baseUrl}
-                  disabled={useDefault}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  {useDefault ? '使用服务器配置的默认 API URL' : '支持通过查询参数覆盖：'}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
+                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
                 </div>
               </label>
 
@@ -224,22 +331,25 @@ export default function SettingsModal() {
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</span>
                 <div className="relative">
                   <input
-                    value={useDefault ? '••••••••••••••••' : draft.apiKey}
+                    value={apiKeyChanged ? draft.apiKey : (draft.apiKey || '••••••••••••••••')}
                     onChange={(e) => {
                       setDraft((prev) => ({ ...prev, apiKey: e.target.value }))
-                      setApiKeyChanged(true) // 标记为已修改
+                      setApiKeyChanged(true)
+                    }}
+                    onFocus={() => {
+                      if (!apiKeyChanged) {
+                        setDraft((prev) => ({ ...prev, apiKey: '' }))
+                      }
                     }}
                     onBlur={(e) => commitSettings({ ...draft, apiKey: e.target.value })}
                     type={showApiKey ? 'text' : 'password'}
                     placeholder="sk-..."
-                    disabled={useDefault}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                   />
                   <button
                     type="button"
                     onClick={() => setShowApiKey((v) => !v)}
-                    disabled={useDefault}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
                     tabIndex={-1}
                   >
                     {showApiKey ? (
@@ -258,7 +368,7 @@ export default function SettingsModal() {
                   </button>
                 </div>
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  {useDefault ? '使用服务器配置的默认 API Key' : '支持通过查询参数覆盖：'}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
+                  保留掩码时不修改原 Key
                 </div>
               </div>
 
@@ -270,8 +380,7 @@ export default function SettingsModal() {
                   onBlur={(e) => commitSettings({ ...draft, model: e.target.value })}
                   type="text"
                   placeholder="gpt-image-2"
-                  disabled={useDefault}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
               </label>
 

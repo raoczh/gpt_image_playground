@@ -166,6 +166,115 @@ export async function setTaskFavorite(id: string, isFavorite: boolean): Promise<
   });
 }
 
+// ==================== API Profiles ====================
+
+export interface ProfileItem {
+  id: string;
+  name: string;
+  provider: string;
+  base_url: string;
+  api_key_masked: string;
+  model: string;
+  timeout: number;
+  api_format: 'imagen' | 'responses';
+  extra: Record<string, unknown>;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getProfiles(): Promise<{ profiles: ProfileItem[] }> {
+  return apiRequest('/api/profiles');
+}
+
+export async function createProfile(payload: {
+  name: string;
+  provider?: string;
+  base_url?: string;
+  api_key?: string;
+  model?: string;
+  timeout?: number;
+  api_format?: 'imagen' | 'responses';
+  extra?: Record<string, unknown>;
+  is_default?: boolean;
+}): Promise<{ id: string }> {
+  return apiRequest('/api/profiles', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProfile(id: string, payload: Partial<{
+  name: string;
+  provider: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  timeout: number;
+  api_format: 'imagen' | 'responses';
+  extra: Record<string, unknown>;
+}>): Promise<void> {
+  await apiRequest(`/api/profiles/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  await apiRequest(`/api/profiles/${id}`, { method: 'DELETE' });
+}
+
+export async function setDefaultProfile(id: string): Promise<void> {
+  await apiRequest(`/api/profiles/${id}/default`, { method: 'PUT' });
+}
+
+// ==================== Custom Providers ====================
+
+export interface CustomProviderItem {
+  id: string;
+  name: string;
+  template?: string | null;
+  submit: Record<string, unknown> | null;
+  editSubmit?: Record<string, unknown> | null;
+  poll?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getCustomProviders(): Promise<{ providers: CustomProviderItem[] }> {
+  return apiRequest('/api/custom-providers');
+}
+
+export async function createCustomProvider(payload: {
+  name: string;
+  template?: string;
+  submit: Record<string, unknown>;
+  editSubmit?: Record<string, unknown>;
+  poll?: Record<string, unknown>;
+}): Promise<{ id: string }> {
+  return apiRequest('/api/custom-providers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCustomProvider(id: string, payload: Partial<{
+  name: string;
+  template: string;
+  submit: Record<string, unknown> | null;
+  editSubmit: Record<string, unknown> | null;
+  poll: Record<string, unknown> | null;
+}>): Promise<void> {
+  await apiRequest(`/api/custom-providers/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteCustomProvider(id: string): Promise<void> {
+  await apiRequest(`/api/custom-providers/${id}`, { method: 'DELETE' });
+}
+
 export async function deleteTask(id: string): Promise<void> {
   await apiRequest(`/api/tasks/${id}`, { method: 'DELETE' });
 }

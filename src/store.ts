@@ -7,6 +7,8 @@ import type {
   TaskRecord,
   ExportData,
   MaskDraft,
+  ApiProfile,
+  CustomProviderDefinition,
 } from './types'
 import { DEFAULT_SETTINGS, DEFAULT_PARAMS } from './types'
 import {
@@ -138,6 +140,13 @@ interface AppState {
   maskDraft: MaskDraft | null
   setMaskDraft: (draft: MaskDraft | null) => void
   clearMaskDraft: () => void
+  // API Profile 多配置
+  profiles: ApiProfile[]
+  activeProfileId: string | null
+  setActiveProfileId: (id: string | null) => void
+  setProfiles: (profiles: ApiProfile[]) => void
+  customProviders: CustomProviderDefinition[]
+  setCustomProviders: (providers: CustomProviderDefinition[]) => void
 
   // UI
   detailTaskId: string | null
@@ -316,6 +325,12 @@ export const useStore = create<AppState>()(
   maskDraft: null,
   setMaskDraft: (maskDraft) => set({ maskDraft }),
   clearMaskDraft: () => set({ maskDraft: null }),
+  profiles: [],
+  activeProfileId: null,
+  setActiveProfileId: (activeProfileId) => set({ activeProfileId }),
+  setProfiles: (profiles) => set({ profiles }),
+  customProviders: [],
+  setCustomProviders: (customProviders) => set({ customProviders }),
 
   // UI
   detailTaskId: null,
@@ -362,6 +377,8 @@ function genId(): string {
 /** 初始化：从后端或 IndexedDB 加载任务和图片缓存，清理孤立图片 */
 export async function initStore() {
   await loadTasksFirstPage()
+  loadProfiles().catch(console.error)
+  loadCustomProviders().catch(console.error)
 
   // 收集所有任务引用的图片 id
   const referencedIds = new Set<string>()
@@ -378,6 +395,57 @@ export async function initStore() {
     } else {
       await deleteImage(img.id)
     }
+  }
+}
+
+function profileItemToProfile(p: backendApi.ProfileItem): ApiProfile {
+  return {
+    id: p.id,
+    name: p.name,
+    provider: p.provider,
+    baseUrl: p.base_url,
+    apiKeyMasked: p.api_key_masked,
+    model: p.model,
+    timeout: p.timeout,
+    apiFormat: p.api_format,
+    extra: p.extra || {},
+    isDefault: Boolean(p.is_default),
+  }
+}
+
+export async function loadProfiles() {
+  const { user } = useStore.getState()
+  if (!user) return
+  try {
+    const res = await backendApi.getProfiles()
+    const profiles = res.profiles.map(profileItemToProfile)
+    const currentActive = useStore.getState().activeProfileId
+    const defaultProfile = profiles.find((p) => p.isDefault) || profiles[0] || null
+    useStore.setState({
+      profiles,
+      activeProfileId: currentActive && profiles.some((p) => p.id === currentActive) ? currentActive : defaultProfile?.id || null,
+    })
+  } catch (error) {
+    console.error('Failed to load profiles:', error)
+  }
+}
+
+export async function loadCustomProviders() {
+  const { user } = useStore.getState()
+  if (!user) return
+  try {
+    const res = await backendApi.getCustomProviders()
+    const providers: CustomProviderDefinition[] = res.providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      template: p.template ?? null,
+      submit: p.submit,
+      editSubmit: p.editSubmit ?? null,
+      poll: p.poll ?? null,
+    }))
+    useStore.setState({ customProviders: providers })
+  } catch (error) {
+    console.error('Failed to load custom providers:', error)
   }
 }
 
@@ -556,6 +624,7 @@ async function executeTask(taskId: string, inputImageIds: string[], maskDataUrl?
       timeoutSec: useStore.getState().settings.timeout,
       maskDataUrl,
       maskTargetImageId,
+      profileId: useStore.getState().activeProfileId || undefined,
     })
 
     // 服务端已落盘并直接 UPDATE tasks 状态，前端只更新本地 store

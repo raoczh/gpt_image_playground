@@ -1,6 +1,31 @@
 // ===== 设置 =====
 
 export type ApiFormat = 'imagen' | 'responses'
+export type BuiltInApiProvider = 'openai' | 'fal'
+export type ApiProvider = BuiltInApiProvider | string
+
+export interface ApiProfile {
+  id: string
+  name: string
+  provider: ApiProvider
+  baseUrl: string
+  /** 后端仅返回掩码 */
+  apiKeyMasked: string
+  model: string
+  timeout: number
+  apiFormat: ApiFormat
+  extra: Record<string, unknown>
+  isDefault: boolean
+}
+
+export interface CustomProviderDefinition {
+  id: string
+  name: string
+  template?: string | null
+  submit: Record<string, unknown> | null
+  editSubmit?: Record<string, unknown> | null
+  poll?: Record<string, unknown> | null
+}
 
 export interface AppSettings {
   baseUrl: string
