@@ -328,25 +328,9 @@ async function callUpstreamImageApi(userId, payload) {
   const timeout = Math.max(Number(apiSettings.timeout) || 600, 10) * 1000;
   const signal = AbortSignal.timeout(timeout);
 
-  // 路由到 provider 专属实现
-  if (apiSettings.provider === 'fal') {
-    return callFalImageApi({
-      apiSettings,
-      baseUrl,
-      prompt,
-      params,
-      inputImageDataUrls,
-      isEdit,
-      mime,
-      maskDataUrl,
-      maskTargetImageId,
-      signal,
-      timeout,
-    });
-  }
-  if (apiSettings.provider !== 'openai') {
-    // 自定义 HTTP provider 后端尚未实现请求构造，直接报错避免静默走 OpenAI 兼容产生不可预期结果
-    const err = new Error(`Provider "${apiSettings.provider}" 尚未实现后端调用逻辑，请切换到 OpenAI 兼容或 fal.ai`);
+  if (apiSettings.provider && apiSettings.provider !== 'openai') {
+    // 只支持 OpenAI 兼容路径；其他 provider 在本部署下未启用
+    const err = new Error(`Provider "${apiSettings.provider}" 未启用，请使用 OpenAI 兼容配置`);
     err.statusCode = 400;
     throw err;
   }
@@ -567,86 +551,6 @@ async function callOpenAIImageApi(opts) {
     throw new Error('接口未返回可用图片数据');
   }
 
-  return { images };
-}
-
-// fal.ai 同步路径：POST https://fal.run/<model>，body JSON 包含 prompt / image_size / image_urls / mask_url 等
-async function callFalImageApi(opts) {
-  const { apiSettings, baseUrl, prompt, params, inputImageDataUrls, isEdit, mime, maskDataUrl, signal } = opts;
-
-  const trimmedModel = (apiSettings.model || 'openai/gpt-image-1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
-  const modelPath = isEdit && !trimmedModel.endsWith('/edit') ? `${trimmedModel}/edit` : trimmedModel;
-  const falRoot = baseUrl.replace(/\/+$/, '') || 'https://fal.run';
-  const endpoint = `${falRoot}/${modelPath}`;
-
-  // 把图片 dataUrl 直接当作 image_urls 数组（fal 兼容 data URL）
-  const body = {
-    prompt,
-    quality: params.quality === 'auto' ? 'high' : params.quality,
-    num_images: Math.min(4, Math.max(1, params.n || 1)),
-    output_format: params.output_format,
-  };
-
-  // 解析尺寸
-  const sizeMatch = String(params.size || '').match(/^(\d+)x(\d+)$/);
-  if (sizeMatch) {
-    body.image_size = { width: Number(sizeMatch[1]), height: Number(sizeMatch[2]) };
-  } else if (isEdit && params.size === 'auto') {
-    body.image_size = 'auto';
-  } else {
-    body.image_size = { width: 1360, height: 1024 };
-  }
-
-  if (isEdit) body.image_urls = inputImageDataUrls;
-  if (maskDataUrl) body.mask_url = maskDataUrl;
-
-  const headers = {
-    Authorization: `Key ${apiSettings.apiKey}`,
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store, no-cache, max-age=0',
-    Pragma: 'no-cache',
-  };
-
-  console.log(`[${new Date().toISOString()}] 🚀 Calling fal.ai - Endpoint: ${endpoint}`);
-  const fetchStartTime = Date.now();
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    cache: 'no-store',
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
-  console.log(`[${new Date().toISOString()}] 📥 fal.ai response - Status: ${response.status}, Time: ${fetchElapsed}s`);
-
-  if (!response.ok) {
-    await parseUpstreamError(response);
-  }
-
-  const payload = await response.json();
-  const items = Array.isArray(payload?.images) ? payload.images : Array.isArray(payload?.data) ? payload.data : [];
-  const images = [];
-  for (const item of items) {
-    if (typeof item === 'string') {
-      images.push(item.startsWith('data:') || item.startsWith('http') ? (item.startsWith('http') ? await fetchImageUrlAsDataUrl(item, mime, {}, signal) : item) : normalizeBase64Image(item, mime));
-      continue;
-    }
-    if (!item || typeof item !== 'object') continue;
-    if (typeof item.url === 'string') {
-      images.push(item.url.startsWith('data:') ? item.url : await fetchImageUrlAsDataUrl(item.url, mime, {}, signal));
-      continue;
-    }
-    if (typeof item.b64_json === 'string') {
-      images.push(normalizeBase64Image(item.b64_json, mime));
-      continue;
-    }
-    if (typeof item.base64 === 'string') {
-      images.push(normalizeBase64Image(item.base64, mime));
-      continue;
-    }
-  }
-  if (!images.length) throw new Error('fal.ai 未返回可用图片数据');
   return { images };
 }
 

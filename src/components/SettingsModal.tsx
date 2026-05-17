@@ -7,7 +7,6 @@ import * as backendApi from '../lib/backendApi'
 
 const PROVIDER_OPTIONS: { value: string; label: string }[] = [
   { value: 'openai', label: 'OpenAI 兼容' },
-  { value: 'fal', label: 'fal.ai' },
 ]
 
 export default function SettingsModal() {
@@ -282,8 +281,8 @@ export default function SettingsModal() {
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                    {draftProvider !== 'openai' && draftProvider !== 'fal' && (
-                      <div className="mt-1 text-[10px] text-red-500 dark:text-red-400">自定义 HTTP provider 当前后端尚未实现请求构造，选择后提交任务会失败（请先用 OpenAI 兼容或 fal.ai）</div>
+                    {draftProvider !== 'openai' && (
+                      <div className="mt-1 text-[10px] text-red-500 dark:text-red-400">当前部署仅启用 OpenAI 兼容，选择其他 provider 提交任务会失败</div>
                     )}
                   </label>
                 </div>

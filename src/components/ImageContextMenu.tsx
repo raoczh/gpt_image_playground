@@ -20,8 +20,10 @@ export default function ImageContextMenu() {
         if (isIOS && isTouch) return
 
         e.preventDefault()
+        // 如果 <img> 通过 data-original-src 暴露了原图 URL（双阶段加载场景下 src 可能是缩略图），优先用原图
+        const originalSrc = imgTarget.dataset.originalSrc
         setMenuInfo({
-          src: imgTarget.src,
+          src: originalSrc || imgTarget.src,
           x: e.clientX,
           y: e.clientY,
         })

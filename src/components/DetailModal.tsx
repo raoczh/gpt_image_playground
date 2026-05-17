@@ -191,6 +191,7 @@ export default function DetailModal() {
               <img
                 ref={mainImageRef}
                 src={currentOutputPreviewSrc}
+                data-original-src={currentOutputImageSrc}
                 className="saveable-image max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
                 onLoad={() => {
                   const panel = imagePanelRef.current
@@ -353,7 +354,8 @@ export default function DetailModal() {
                       <img
                         key={imgId}
                         src={thumb}
-                        className="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-white/[0.08] cursor-pointer hover:opacity-80 transition"
+                        data-original-src={url}
+                        className="saveable-image w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-white/[0.08] cursor-pointer hover:opacity-80 transition"
                         onClick={() => url && setLightboxImageId(url, task.inputImageUrls || [])}
                         alt=""
                       />

@@ -74,15 +74,12 @@
 - **预估工作量**：1 天
 - **状态**：⏳
 
-### U1-2 fal.ai Provider 支持
+### U1-2 fal.ai Provider 支持 ❌ 已撤回
 
+- **决策（2026-05-17）**：本部署面向 OpenAI 兼容服务（含官方/Azure/第三方代理/本地网关），fal.ai 是独立平台、需用户单独注册付费 key、跟 OpenAI 协议完全不同。留着只会增加 UI 复杂度和维护成本——已移除。
 - **上游**：`bc496dc`，[src/lib/falAiImageApi.ts](../src/lib/falAiImageApi.ts) 227 行
-- **本分支接入点**：
-  - 这是「上游」调用的另一种实现，本分支的请求实际由后端 [server/server.js](../server/server.js) `callUpstreamImageApi` 转发，**该函数当前只支持 OpenAI 兼容**
-  - 需要在后端识别 provider 类型（OpenAI / fal.ai），分别走不同的请求构造和响应解析
-  - 用户配置层：[server/server.js](../server/server.js) `/api/settings` 加 `provider` 字段；前端 [SettingsModal.tsx](../src/components/SettingsModal.tsx) 加 provider 选择
-- **依赖**：与 U2-2 (API Profiles) 紧耦合，建议合并一起做
-- **预估工作量**：U1-2 + U2-2 一起约 2 天
+- **本分支状态**：仅启用 OpenAI 兼容路径，前端 provider 选择只剩 OpenAI 一项；非 OpenAI provider 后端直接 400 报错
+- **合并时**：上游的 falImageApi.ts / falAiImageApi.ts 等纯新增文件会被 take theirs 拉进来，合并后手动删除（见第十节）
 - **状态**：⏳
 
 ### U1-3 通用组件库
@@ -281,7 +278,7 @@ git merge main
 | 项 | 阶段 | 状态 | 完成时间 | 关键 commit |
 |---|---|---|---|---|
 | U1-1 蒙版编辑器 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-1 蒙版编辑器` |
-| U1-2 fal.ai provider | U1 | ✅ | 2026-05-17 | 合并到 U1-2+U2-2 后端基础 / 前端 profile UI |
+| U1-2 fal.ai provider | U1 | ❌ 撤回 | 2026-05-17 | 经评估不适合本部署场景，已移除 |
 | U1-3 通用组件库 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-3 cherry-pick 通用组件库` |
 | U1-4 iOS / PWA 修复 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-4 iOS / PWA 修复` |
 | U1-5 参考图拖拽排序 | U1 | ✅ | 2026-05-17 | `feat(upstream): U1-5 支持拖拽排序参考图` |
@@ -300,7 +297,9 @@ git merge main
 
 ## 十三、当前遗留与下一步
 
-**已完成（13/15）：** U1-1/U1-2/U1-3/U1-4/U1-5、U2-2/U2-3、U3-1/U3-2、U4-1/U4-2/U4-3/U4-4
+**已完成（12/15，1 项主动撤回）：** U1-1/U1-3/U1-4/U1-5、U2-2/U2-3、U3-1/U3-2、U4-1/U4-2/U4-3/U4-4
+
+**主动撤回（1/15）：** U1-2 fal.ai provider（本部署不需要）
 
 **未完成（2/15）：**
 - **U2-1 @mention 图片引用** — 需要把 InputBar 从 textarea 改为 contentEditable，移植 [src/lib/promptImageMentions.ts](../src/lib/promptImageMentions.ts) 解析逻辑。还需要决策"@图N" 在本分支语义（@当前 inputImages 还是 @历史图片库），并新增"从图片库选图"UI 入口。预估 2-3 天。
@@ -311,9 +310,86 @@ git merge main
 2. U2-1 / U3-3 等合并完成后再单独处理。
 
 **注意事项（已知简化）：**
-- 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑暂未实现。当前选择此类 provider 提交任务时**直接返回 400 报错**（不再静默走 OpenAI fallback，避免产生不可预期结果）。需要单独补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析。
-- fal.ai 走最小 HTTP 路径（POST `https://fal.run/<model>`），未引入 `@fal-ai/client` SDK 也未实现异步 queue/poll；同步模型够用，复杂的 `falRequestId` 恢复机制留给后续。
-- API Profile 增加了 `user_api_profiles` 和 `user_custom_providers` 两张表，旧 `user_settings` 表保留作为兼容回退。第一次访问 `/api/profiles` 时自动迁移一条默认 profile。
+- **fal.ai 已撤回**：本部署仅启用 OpenAI 兼容路径，前端 SettingsModal provider 选项只剩 OpenAI 一项；后端 `callUpstreamImageApi` 对非 OpenAI provider 直接 400 报错
+- 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑未实现，选择后会被 400 拦截。如果未来要启用，需要补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析
+- API Profile 增加了 `user_api_profiles` 和 `user_custom_providers` 两张表，旧 `user_settings` 表保留作为兼容回退。第一次访问 `/api/profiles` 时自动迁移一条默认 profile
+
+### 合并清单（执行 `git merge main` 时的指引）
+
+按文件分类的取舍。
+
+合并前/中的具体取舍——按文件分类。
+
+### A. 直接 take ours（已实现等价功能或本分支主动选择）
+
+- [src/store.ts](../src/store.ts) — backend-first 状态层
+- [src/types.ts](../src/types.ts) — `BuiltInApiProvider = 'openai'`，撤回了 fal
+- [src/lib/api.ts](../src/lib/api.ts) — 极简 fetch 转发到后端
+- [src/lib/db.ts](../src/lib/db.ts) — 已退化为缓存 helper，主数据走后端
+- [src/lib/devProxy.ts](../src/lib/devProxy.ts) — 本分支自定义版本
+- [src/main.tsx](../src/main.tsx) — 主动 `unregister()` Service Worker，不启用 PWA
+- [src/components/Header.tsx](../src/components/Header.tsx) — 含 GitHub 登录入口
+- [src/components/SettingsModal.tsx](../src/components/SettingsModal.tsx) — Profile UI 已重构，且只支持 OpenAI provider
+- [src/components/InputBar.tsx](../src/components/InputBar.tsx) — 已用 Pointer Events 实现拖拽（U2-1 @mention 未做，若以后做再单独迭代）
+- [src/components/TaskGrid.tsx](../src/components/TaskGrid.tsx) — 含批量选择 + 收藏过滤
+- [src/components/TaskCard.tsx](../src/components/TaskCard.tsx) — 含收藏 + `data-original-src` + 多选 checkbox
+- [src/components/DetailModal.tsx](../src/components/DetailModal.tsx) — 双阶段加载 + `data-original-src`
+- [src/components/Lightbox.tsx](../src/components/Lightbox.tsx) — 一直用原图，本分支 src 同步赋值无 race
+- [src/components/Toast.tsx](../src/components/Toast.tsx) — 已队列化
+- [src/components/ImageContextMenu.tsx](../src/components/ImageContextMenu.tsx) — 优先取 `dataset.originalSrc`
+- [src/hooks/useVersionCheck.ts](../src/hooks/useVersionCheck.ts) — 本分支已删除（version 由后端管理）
+
+### B. take theirs（纯新增、本分支没有）
+
+- [src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx) — 已 cherry-pick，文件名相同会自动合
+- [src/components/Checkbox.tsx](../src/components/Checkbox.tsx) [HelpModal.tsx](../src/components/HelpModal.tsx) [SupportPromptModal.tsx](../src/components/SupportPromptModal.tsx) [ViewportTooltip.tsx](../src/components/ViewportTooltip.tsx) [icons.tsx](../src/components/icons.tsx) — 已 cherry-pick
+- 上游测试文件 `*.test.ts` — 本分支没有测试基础设施，take theirs 不会冲突但可能需要 vitest 配置才能跑
+
+### C. 合并后**手动删除**（take theirs 进来但本分支用不上）
+
+| 文件 | 原因 |
+|---|---|
+| `src/lib/apiProfiles.ts` | 本分支 Profile 管理在 server.js + store.ts 里，前端不需要 |
+| `src/lib/apiShared.ts` | 上游 API 抽象层，本分支只走 backendApi |
+| `src/lib/openaiCompatibleImageApi.ts` `src/lib/oaiImageApi.ts` | 同上 |
+| `src/lib/falAiImageApi.ts` `src/lib/falImageApi.ts` | fal.ai 已撤回 |
+| `src/lib/promptImageMentions.ts` + `*.test.ts` | U2-1 未做，文件进来没人用 |
+| `src/lib/urlSettings.ts` + `*.test.ts` | 上游 URL 查询参数处理，本分支配置在后端 |
+| `src/lib/paramCompatibility.ts` `src/lib/paramDisplay.tsx` | 跟 a2edf71 / 10ad814 的 TaskCard 参数显示绑定，本分支没采用 |
+| `src/hooks/useDockerApiUrlMigrationNotice.ts` `src/hooks/useDockerBreakingChangeNotice.ts` | 上游 Docker env 重构通知，本分支不适用 |
+| `scripts/mock-image-api.mjs` `docs/mock-image-api.md` | 上游本地 mock 工具，本分支测试用真实后端 |
+| `wrangler.jsonc` | Cloudflare Worker 部署，本分支走宝塔/Docker |
+| `.github/workflows/vercel-tag-deploy.yml` | Vercel 部署，本分支走宝塔/Docker |
+| `deploy/migrate-api-env.envsh` `src/hooks/useDocker*Notice.ts` | 上游 docker env 迁移辅助 |
+
+### D. 手工合并（双方都有但需要逐块取舍）
+
+| 文件 | 怎么合 |
+|---|---|
+| `package.json` `package-lock.json` | 取依赖并集，注意 `sharp`（本分支后端用）保留；上游可能新增的 `@fal-ai/client` 等可删；`npm install` 重新生成 lock |
+| `.gitignore` | 取并集即可 |
+| `README.md` | 本分支 [README_BAOTA.md](../README_BAOTA.md) / [README_DEPLOY.md](../README_DEPLOY.md) 已经覆盖部署说明；上游 README 改进可挑性能/功能描述部分合进来 |
+
+### E. 检查 modify/delete 冲突
+
+- `src/hooks/useVersionCheck.ts` —— 本分支删了，main 改了。冲突时选 `git rm` 保持删除
+
+### 合并执行步骤
+
+```bash
+git checkout local-gpt-image
+git fetch origin main
+git merge --no-commit main         # 不要立即提交，先解冲突
+# 按上面 A/B/C/D 表分别处理冲突
+git status                          # 看剩余 unmerged
+# 对 A 类：git checkout --ours <file>
+# 对 E 类：git rm src/hooks/useVersionCheck.ts
+npm install                         # 重新生成 lock
+npx tsc --noEmit                    # 类型校验
+# 启动开发服 + 后端，跑通主流程后再 commit
+git commit
+# 合并完成后再处理 C 类：git rm 那些用不上的文件
+```
 
 ---
 
@@ -331,5 +407,6 @@ git merge main
 | R-6 | P2 | `selectAllTasks` 实际只选当前已加载的页（默认 20 条），命名误导 | 重命名为 `selectLoadedTasks`，UI 按钮文案改为"全选已加载"，加 `title` 提示用户继续滚动可加载更多 |
 | R-7 | P2 | `batchDeleteSelected` 在前端再跑一遍"清理孤立图片 → IndexedDB `deleteImage`"，但后端 batch-delete 已经处理了——这是 IndexedDB 时代的死代码 | 移除前端 IndexedDB 清理逻辑，仅清理 `imageCache` 内存条目避免占用内存 |
 | R-8 | P2 | 后端 `callUpstreamImageApi` 遇到未实现的自定义 provider 时 `console.warn + 回退 OpenAI`——静默 fallback 会产生不可预期结果 | 改为抛 400 错误：`Provider "X" 尚未实现后端调用逻辑`；前端 SettingsModal 提示文案从黄色"会回退"改为红色"会失败" |
+| R-9 | P1 | U4-2 双阶段加载副作用：右键复制/下载图片时拿到 `<img>` 的 `src`，这时可能还是缩略图（256px webp），用户复制/下载到的不是原图 | [ImageContextMenu](../src/components/ImageContextMenu.tsx) 优先读 `dataset.originalSrc`；[TaskCard](../src/components/TaskCard.tsx) 主图、[DetailModal](../src/components/DetailModal.tsx) 主图 + 输入图缩略图都加上 `data-original-src` |
 
 所有改动 `npx tsc --noEmit` 通过。涉及文件：[server/db.js](../server/db.js)、[server/server.js](../server/server.js)、[src/store.ts](../src/store.ts)、[src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx)、[src/components/DetailModal.tsx](../src/components/DetailModal.tsx)、[src/components/SettingsModal.tsx](../src/components/SettingsModal.tsx)、[src/components/InputBar.tsx](../src/components/InputBar.tsx)、[src/components/TaskGrid.tsx](../src/components/TaskGrid.tsx)。

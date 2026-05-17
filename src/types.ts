@@ -1,7 +1,7 @@
 // ===== 设置 =====
 
 export type ApiFormat = 'imagen' | 'responses'
-export type BuiltInApiProvider = 'openai' | 'fal'
+export type BuiltInApiProvider = 'openai'
 export type ApiProvider = BuiltInApiProvider | string
 
 export interface ApiProfile {

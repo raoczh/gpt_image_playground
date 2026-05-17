@@ -164,6 +164,7 @@ export default function TaskCard({
             <>
               <img
                 src={thumbSrc}
+                data-original-src={task.outputImages?.[0] || ''}
                 className="saveable-image w-full h-full object-cover"
                 loading="lazy"
                 alt=""
