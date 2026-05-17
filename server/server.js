@@ -32,6 +32,7 @@ const MIME_MAP = {
   jpeg: 'image/jpeg',
   webp: 'image/webp',
 };
+const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:';
 
 if (!process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET is required');
@@ -304,15 +305,16 @@ async function callUpstreamImageApi(userId, payload) {
       tool.output_compression = params.output_compression;
     }
 
+    const guardedPrompt = `${PROMPT_REWRITE_GUARD_PREFIX}\n${prompt}`;
     let input;
     if (isEdit) {
-      const content = [{ type: 'input_text', text: prompt }];
+      const content = [{ type: 'input_text', text: guardedPrompt }];
       for (const dataUrl of inputImageDataUrls) {
         content.push({ type: 'input_image', image_url: dataUrl });
       }
       input = [{ role: 'user', content }];
     } else {
-      input = prompt;
+      input = guardedPrompt;
     }
 
     const endpoint = `${baseUrl}/v1/responses`;
