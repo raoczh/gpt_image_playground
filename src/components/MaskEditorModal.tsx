@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ensureImageCached, useStore } from '../store'
+import { cacheImage, ensureImageCached, useStore } from '../store'
 import { canvasToBlob, loadImage } from '../lib/canvasImage'
-import { storeImage } from '../lib/db'
+import * as backendApi from '../lib/backendApi'
 import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../lib/maskPreprocess'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -790,7 +790,20 @@ export default function MaskEditorModal() {
       setIsSaving(true)
       const blob = await canvasToBlob(canvas, 'image/png')
       const maskDataUrl = await blobToDataUrl(blob)
-      const workingTargetId = await storeImage(sourceDataUrl, 'upload')
+
+      // 后端化路线：处理后的目标图需要走 /api/images/save 上传到服务端，
+      // 拿到服务端 SHA-256(file bytes) 作为 ID。
+      // 如果 sourceDataUrl 与原 dataUrl 相同（既未 resize 也未转 PNG），直接复用原 imageId 即可，避免重复上传。
+      let workingTargetId: string
+      const originalImage = useStore.getState().inputImages.find((img) => img.id === savingImageId)
+      if (originalImage && originalImage.dataUrl === sourceDataUrl) {
+        workingTargetId = savingImageId
+      } else {
+        const saved = await backendApi.saveImage(sourceDataUrl, 'upload')
+        workingTargetId = saved.id
+        cacheImage(workingTargetId, sourceDataUrl)
+      }
+
       if (
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||

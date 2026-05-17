@@ -14,6 +14,8 @@ export default function DetailModal() {
   const [imageIndex, setImageIndex] = useState(0)
   const [imageRatios, setImageRatios] = useState<Record<string, string>>({})
   const [imageSizes, setImageSizes] = useState<Record<string, string>>({})
+  /** 已完成原图预加载的 image id，命中后主图切换为原图（双阶段加载：缩略图占位 → 原图替换） */
+  const [highResLoaded, setHighResLoaded] = useState<Set<string>>(new Set())
   const imagePanelRef = useRef<HTMLDivElement>(null)
   const mainImageRef = useRef<HTMLImageElement>(null)
   const [imageLabelLeft, setImageLabelLeft] = useState(8)
@@ -33,28 +35,19 @@ export default function DetailModal() {
   const currentOutputImageId = task?.outputImages?.[imageIndex] || ''
   const currentOutputImageSrc = currentOutputImageId
   const currentOutputThumbSrc = task?.outputThumbnails?.[imageIndex] || ''
-  // 详情预览优先用缩略图（解码代价低），不可用时回退到完整图
-  const currentOutputPreviewSrc = currentOutputThumbSrc || currentOutputImageSrc
+  // 双阶段加载：原图预加载完成前显示缩略图，完成后切到原图（避免大图阻塞首次渲染）
+  const currentOutputPreviewSrc =
+    currentOutputImageId && highResLoaded.has(currentOutputImageId)
+      ? currentOutputImageSrc
+      : currentOutputThumbSrc || currentOutputImageSrc
 
   useEffect(() => {
     if (!currentOutputImageId || !currentOutputImageSrc) return
 
     let cancelled = false
     const image = new Image()
-    image.onload = () => {
-      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
-        setImageRatios((prev) => ({
-          ...prev,
-          [currentOutputImageId]: formatImageRatio(image.naturalWidth, image.naturalHeight),
-        }))
-        setImageSizes((prev) => ({
-          ...prev,
-          [currentOutputImageId]: `${image.naturalWidth}×${image.naturalHeight}`,
-        }))
-      }
-    }
-    image.src = currentOutputImageSrc
-    if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+    const markLoaded = () => {
+      if (cancelled || !image.naturalWidth || !image.naturalHeight) return
       setImageRatios((prev) => ({
         ...prev,
         [currentOutputImageId]: formatImageRatio(image.naturalWidth, image.naturalHeight),
@@ -63,7 +56,16 @@ export default function DetailModal() {
         ...prev,
         [currentOutputImageId]: `${image.naturalWidth}×${image.naturalHeight}`,
       }))
+      setHighResLoaded((prev) => {
+        if (prev.has(currentOutputImageId)) return prev
+        const next = new Set(prev)
+        next.add(currentOutputImageId)
+        return next
+      })
     }
+    image.onload = markLoaded
+    image.src = currentOutputImageSrc
+    if (image.complete) markLoaded()
 
     return () => {
       cancelled = true

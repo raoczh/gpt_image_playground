@@ -283,7 +283,7 @@ export default function SettingsModal() {
                       ))}
                     </select>
                     {draftProvider !== 'openai' && draftProvider !== 'fal' && (
-                      <div className="mt-1 text-[10px] text-amber-500 dark:text-amber-400">自定义 HTTP provider 当前后端暂未实现请求构造，回退到 OpenAI 兼容</div>
+                      <div className="mt-1 text-[10px] text-red-500 dark:text-red-400">自定义 HTTP provider 当前后端尚未实现请求构造，选择后提交任务会失败（请先用 OpenAI 兼容或 fal.ai）</div>
                     )}
                   </label>
                 </div>
@@ -323,7 +323,7 @@ export default function SettingsModal() {
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
+                  留空时使用服务器配置的默认 API URL；支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
                 </div>
               </label>
 
@@ -368,7 +368,7 @@ export default function SettingsModal() {
                   </button>
                 </div>
                 <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  保留掩码时不修改原 Key
+                  留空时使用服务器配置的默认 API Key；保留掩码时不修改原 Key
                 </div>
               </div>
 

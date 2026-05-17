@@ -311,6 +311,25 @@ git merge main
 2. U2-1 / U3-3 等合并完成后再单独处理。
 
 **注意事项（已知简化）：**
-- 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑暂未实现（落到 `callOpenAIImageApi` 兜底）。需要单独补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析。
+- 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑暂未实现。当前选择此类 provider 提交任务时**直接返回 400 报错**（不再静默走 OpenAI fallback，避免产生不可预期结果）。需要单独补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析。
 - fal.ai 走最小 HTTP 路径（POST `https://fal.run/<model>`），未引入 `@fal-ai/client` SDK 也未实现异步 queue/poll；同步模型够用，复杂的 `falRequestId` 恢复机制留给后续。
 - API Profile 增加了 `user_api_profiles` 和 `user_custom_providers` 两张表，旧 `user_settings` 表保留作为兼容回退。第一次访问 `/api/profiles` 时自动迁移一条默认 profile。
+
+---
+
+## 十四、Review 回归修复（2026-05-17 增补）
+
+完成后做了一轮系统 review，发现 8 个问题并全部修复：
+
+| 编号 | 优先级 | 问题 | 修复 |
+|---|---|---|---|
+| R-1 | P0 | [server/db.js](../server/db.js) `initDatabase` 没同步 `is_favorite`、`api_profile_*` 字段，也未创建 `user_api_profiles` / `user_custom_providers` 两张新表。**全新部署会直接报"Unknown column"/"Table doesn't exist"**，无法用 U2-2 / U3-2 功能 | 补全 [server/db.js](../server/db.js) 的 `IF NOT EXISTS` + 自动 `ALTER TABLE` 自检逻辑，全新部署和已有部署都能自动迁移 |
+| R-2 | P0 | [src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx) `handleSave` 用 `storeImage`（本地 IndexedDB hash）作为 mask 目标图 ID，但后端按 server-side `SHA-256(file bytes)` 查 image。两个 ID 永远不一致，**提交带 mask 的任务必报 400** | 改走 `backendApi.saveImage(sourceDataUrl, 'upload')` 拿后端真实 ID；如果 `sourceDataUrl === 原 dataUrl`（既未 resize 也未转 PNG）则复用原 imageId 避免重复上传 |
+| R-3 | P1 | U4-2 把 [DetailModal](../src/components/DetailModal.tsx) 主图直接换成 256px 缩略图，**大屏下显示模糊** | 改为双阶段加载：初始用缩略图占位 → 后台 `new Image()` 预加载原图 → `onload` 时切换 `displaySrc`，配合 `highResLoaded: Set<string>` 记录已加载，重复进入同一图无闪烁 |
+| R-4 | P1 | [SettingsModal](../src/components/SettingsModal.tsx) 删除了"使用默认配置"开关，但 UI 没有提示"留空 = 用服务端 `DEFAULT_API_URL` / `DEFAULT_API_KEY`"，宝塔多用户部署体验回归 | API URL / API Key 输入框下方加上"留空时使用服务器配置的默认 …"提示 |
+| R-5 | P2 | U1-5 用 HTML5 `draggable` API，**iOS Safari / 移动 Chrome 不支持**，移动端拖拽完全失效 | 改用 Pointer Events（`onPointerDown/Move/Up/Cancel`）+ `setPointerCapture`，桌面端和触屏统一。阈值 6px 区分点击和拖拽，配合 `thumbJustDraggedRef` 防止拖拽结束误触 Lightbox |
+| R-6 | P2 | `selectAllTasks` 实际只选当前已加载的页（默认 20 条），命名误导 | 重命名为 `selectLoadedTasks`，UI 按钮文案改为"全选已加载"，加 `title` 提示用户继续滚动可加载更多 |
+| R-7 | P2 | `batchDeleteSelected` 在前端再跑一遍"清理孤立图片 → IndexedDB `deleteImage`"，但后端 batch-delete 已经处理了——这是 IndexedDB 时代的死代码 | 移除前端 IndexedDB 清理逻辑，仅清理 `imageCache` 内存条目避免占用内存 |
+| R-8 | P2 | 后端 `callUpstreamImageApi` 遇到未实现的自定义 provider 时 `console.warn + 回退 OpenAI`——静默 fallback 会产生不可预期结果 | 改为抛 400 错误：`Provider "X" 尚未实现后端调用逻辑`；前端 SettingsModal 提示文案从黄色"会回退"改为红色"会失败" |
+
+所有改动 `npx tsc --noEmit` 通过。涉及文件：[server/db.js](../server/db.js)、[server/server.js](../server/server.js)、[src/store.ts](../src/store.ts)、[src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx)、[src/components/DetailModal.tsx](../src/components/DetailModal.tsx)、[src/components/SettingsModal.tsx](../src/components/SettingsModal.tsx)、[src/components/InputBar.tsx](../src/components/InputBar.tsx)、[src/components/TaskGrid.tsx](../src/components/TaskGrid.tsx)。

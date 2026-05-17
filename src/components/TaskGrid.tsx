@@ -16,7 +16,7 @@ export default function TaskGrid() {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectionMode = useStore((s) => s.setSelectionMode)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
-  const selectAllTasks = useStore((s) => s.selectAllTasks)
+  const selectLoadedTasks = useStore((s) => s.selectLoadedTasks)
   const clearTaskSelection = useStore((s) => s.clearTaskSelection)
   const batchDeleteSelected = useStore((s) => s.batchDeleteSelected)
 
@@ -100,9 +100,10 @@ export default function TaskGrid() {
               <span className="font-medium">已选 {selectedTaskIds.size}</span>
               <button
                 type="button"
-                onClick={() => selectAllTasks()}
+                onClick={() => selectLoadedTasks()}
                 className="text-xs text-blue-500 hover:text-blue-600"
-              >全选</button>
+                title="选中当前已加载的记录，向下滚动加载更多后可继续选"
+              >全选已加载</button>
               <button
                 type="button"
                 onClick={() => clearTaskSelection()}

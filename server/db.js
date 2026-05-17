@@ -148,6 +148,81 @@ async function initDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户设置表'
     `);
 
+    // 检查并添加 tasks 表的 is_favorite 字段（U3-2 收藏）
+    const [favoriteColumns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'is_favorite'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (favoriteColumns.length === 0) {
+      console.log('  📝 Adding is_favorite column to tasks table...');
+      await connection.query(`
+        ALTER TABLE tasks
+        ADD COLUMN is_favorite TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否收藏' AFTER status,
+        ADD INDEX idx_favorite (is_favorite)
+      `);
+      console.log('  ✅ Added is_favorite column');
+    }
+
+    // 检查并添加 tasks 表的 api_profile_* 快照字段（U2-2 API Profiles）
+    const [profileSnapshotColumns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'api_profile_id'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (profileSnapshotColumns.length === 0) {
+      console.log('  📝 Adding api_profile_* snapshot columns to tasks table...');
+      await connection.query(`
+        ALTER TABLE tasks
+        ADD COLUMN api_profile_id VARCHAR(50) NULL COMMENT '使用的 API Profile ID' AFTER params,
+        ADD COLUMN api_provider VARCHAR(50) NULL COMMENT 'Provider 类型快照' AFTER api_profile_id,
+        ADD COLUMN api_profile_name VARCHAR(100) NULL COMMENT 'Profile 名称快照' AFTER api_provider,
+        ADD COLUMN api_model VARCHAR(200) NULL COMMENT '模型 ID 快照' AFTER api_profile_name
+      `);
+      console.log('  ✅ Added api_profile_* snapshot columns');
+    }
+
+    // 创建 API Profile 表（U2-2）
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_api_profiles (
+        id VARCHAR(50) PRIMARY KEY COMMENT 'Profile ID',
+        user_id INT NOT NULL COMMENT '用户 ID',
+        name VARCHAR(100) NOT NULL COMMENT 'Profile 名称',
+        provider VARCHAR(50) NOT NULL DEFAULT 'openai' COMMENT 'Provider 类型: openai / fal / <custom>',
+        base_url VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'API 地址',
+        api_key VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'API Key',
+        model VARCHAR(200) NOT NULL DEFAULT '' COMMENT '模型 ID',
+        timeout INT NOT NULL DEFAULT 600 COMMENT '超时（秒）',
+        api_format ENUM('imagen', 'responses') NOT NULL DEFAULT 'responses' COMMENT 'OpenAI 模式',
+        extra_settings JSON COMMENT '其他扩展设置',
+        is_default TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认 profile',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_id (user_id),
+        INDEX idx_user_default (user_id, is_default),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户 API 配置 Profile'
+    `);
+
+    // 创建自定义 HTTP Provider 表（U2-2）
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_custom_providers (
+        id VARCHAR(50) PRIMARY KEY COMMENT 'Custom provider ID',
+        user_id INT NOT NULL COMMENT '用户 ID',
+        name VARCHAR(100) NOT NULL COMMENT 'Provider 显示名',
+        template VARCHAR(50) NULL COMMENT '模板类型',
+        submit_config JSON NOT NULL COMMENT '提交配置',
+        edit_submit_config JSON NULL COMMENT '编辑模式提交配置',
+        poll_config JSON NULL COMMENT '轮询配置',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_id (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户自定义 HTTP Provider'
+    `);
+
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
     console.error('❌ Database initialization failed:', error.message);

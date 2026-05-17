@@ -59,6 +59,17 @@ export default function InputBar() {
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [thumbDragIndex, setThumbDragIndex] = useState<number | null>(null)
   const [thumbDragOverIndex, setThumbDragOverIndex] = useState<number | null>(null)
+  // 拖拽手势状态（pointer events 同时覆盖鼠标 + 触屏）。用 ref 避免 closure 过期。
+  const thumbDragRef = useRef<{
+    startX: number
+    startY: number
+    pointerId: number
+    idx: number
+    startedDrag: boolean
+    overIndex: number | null
+  } | null>(null)
+  // 拖拽刚结束的一帧内拦截 click，避免触发 Lightbox
+  const thumbJustDraggedRef = useRef(false)
   const handleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })
   const [outputCompressionInput, setOutputCompressionInput] = useState(
@@ -323,33 +334,78 @@ export default function InputBar() {
           const showDropBefore = thumbDragOverIndex === idx && thumbDragIndex !== idx
           const showDropAfter = thumbDragOverIndex === inputImages.length && isLast && thumbDragIndex !== idx
 
-          const handleDragStart = (e: React.DragEvent) => {
-            setThumbDragIndex(idx)
-            e.dataTransfer.effectAllowed = 'move'
-            e.dataTransfer.setData('text/plain', String(idx))
-          }
-          const handleDragOver = (e: React.DragEvent) => {
-            if (thumbDragIndex === null) return
-            e.preventDefault()
-            e.dataTransfer.dropEffect = 'move'
-            if (thumbDragIndex === idx) return
-            const rect = e.currentTarget.getBoundingClientRect()
-            const midX = rect.left + rect.width / 2
-            setThumbDragOverIndex(e.clientX < midX ? idx : idx + 1)
-          }
-          const handleDrop = (e: React.DragEvent) => {
-            if (thumbDragIndex === null) return
-            e.preventDefault()
-            e.stopPropagation()
-            if (thumbDragIndex !== idx) {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const midX = rect.left + rect.width / 2
-              moveInputImage(thumbDragIndex, e.clientX < midX ? idx : idx + 1)
+          const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+            if (e.button !== undefined && e.button !== 0) return
+            thumbDragRef.current = {
+              startX: e.clientX,
+              startY: e.clientY,
+              pointerId: e.pointerId,
+              idx,
+              startedDrag: false,
+              overIndex: null,
             }
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {
+              // 某些环境（触屏 Safari 早期版本）可能抛错，忽略
+            }
+          }
+
+          const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+            const state = thumbDragRef.current
+            if (!state || state.pointerId !== e.pointerId) return
+            const dx = e.clientX - state.startX
+            const dy = e.clientY - state.startY
+            if (!state.startedDrag) {
+              if (Math.hypot(dx, dy) < 6) return
+              state.startedDrag = true
+              setThumbDragIndex(state.idx)
+            }
+            e.preventDefault()
+            const container = imagesRef.current
+            if (!container) return
+            const thumbs = container.querySelectorAll<HTMLElement>('[data-thumb-index]')
+            let hoverIdx: number | null = null
+            for (const el of Array.from(thumbs)) {
+              const rect = el.getBoundingClientRect()
+              if (
+                e.clientX >= rect.left && e.clientX <= rect.right &&
+                e.clientY >= rect.top && e.clientY <= rect.bottom
+              ) {
+                const i = Number(el.dataset.thumbIndex)
+                hoverIdx = e.clientX < rect.left + rect.width / 2 ? i : i + 1
+                break
+              }
+            }
+            state.overIndex = hoverIdx
+            setThumbDragOverIndex(hoverIdx)
+          }
+
+          const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+            const state = thumbDragRef.current
+            if (!state || state.pointerId !== e.pointerId) return
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {
+              // ignore
+            }
+            if (state.startedDrag) {
+              if (state.overIndex !== null && state.overIndex !== state.idx && state.overIndex !== state.idx + 1) {
+                moveInputImage(state.idx, state.overIndex)
+              }
+              thumbJustDraggedRef.current = true
+              // 下一帧重置，让随之到来的 click 被拦截
+              window.setTimeout(() => { thumbJustDraggedRef.current = false }, 0)
+            }
+            thumbDragRef.current = null
             setThumbDragIndex(null)
             setThumbDragOverIndex(null)
           }
-          const handleDragEnd = () => {
+
+          const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+            const state = thumbDragRef.current
+            if (!state || state.pointerId !== e.pointerId) return
+            thumbDragRef.current = null
             setThumbDragIndex(null)
             setThumbDragOverIndex(null)
           }
@@ -357,12 +413,12 @@ export default function InputBar() {
           return (
             <div
               key={img.id}
-              className={`relative group inline-block shrink-0 transition-opacity ${isDraggingThumb ? 'opacity-40' : ''}`}
-              draggable
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onDragEnd={handleDragEnd}
+              data-thumb-index={idx}
+              className={`relative group inline-block shrink-0 transition-opacity touch-none ${isDraggingThumb ? 'opacity-40' : ''}`}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
             >
               <div
                 className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing ${
@@ -374,7 +430,10 @@ export default function InputBar() {
                         ? 'border-2 border-blue-500'
                         : 'border border-gray-200 dark:border-white/[0.08]'
                 }`}
-                onClick={() => setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))}
+                onClick={() => {
+                  if (thumbJustDraggedRef.current) return
+                  setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))
+                }}
               >
                 <img
                   src={img.dataUrl}

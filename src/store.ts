@@ -20,7 +20,6 @@ import {
   deleteImage,
   clearImages,
   hashDataUrl,
-  storeImage,
 } from './lib/db'
 import { callImageApi } from './lib/api'
 import { normalizeImageSize } from './lib/size'
@@ -35,7 +34,7 @@ import * as backendApi from './lib/backendApi'
 const imageCache = new Map<string, string>()
 const MAX_IMAGE_CACHE_ENTRIES = 100
 
-function cacheImage(id: string, dataUrl: string) {
+export function cacheImage(id: string, dataUrl: string) {
   imageCache.delete(id)
   imageCache.set(id, dataUrl)
   while (imageCache.size > MAX_IMAGE_CACHE_ENTRIES) {
@@ -131,7 +130,7 @@ interface AppState {
   selectedTaskIds: Set<string>
   setSelectionMode: (mode: boolean) => void
   toggleTaskSelection: (id: string) => void
-  selectAllTasks: () => void
+  selectLoadedTasks: () => void
   clearTaskSelection: () => void
   batchDeleteSelected: () => Promise<void>
   // 蒙版编辑器
@@ -279,7 +278,7 @@ export const useStore = create<AppState>()(
       else next.add(id)
       return { selectedTaskIds: next }
     }),
-  selectAllTasks: () =>
+  selectLoadedTasks: () =>
     set((s) => ({ selectedTaskIds: new Set(s.tasks.map((t) => t.id)) })),
   clearTaskSelection: () => set({ selectedTaskIds: new Set<string>() }),
   batchDeleteSelected: async () => {
@@ -295,28 +294,21 @@ export const useStore = create<AppState>()(
       throw error
     }
 
-    // 清理本地引用
+    // 清理本地任务引用。图片资源的孤立清理由后端 batch-delete 完成，
+    // 前端只需要丢掉被删任务的 imageCache 条目，避免占用内存。
     const remaining = state.tasks.filter((t) => !state.selectedTaskIds.has(t.id))
-    set({ tasks: remaining, selectedTaskIds: new Set<string>(), selectionMode: false })
-
-    // 收集被删任务的图片，删除孤立的
-    const targetImageIds = new Set<string>()
-    for (const t of targets) {
-      for (const id of t.inputImageIds || []) targetImageIds.add(id)
-      for (const id of t.outputImages || []) targetImageIds.add(id)
-    }
     const stillUsed = new Set<string>()
     for (const t of remaining) {
       for (const id of t.inputImageIds || []) stillUsed.add(id)
       for (const id of t.outputImages || []) stillUsed.add(id)
     }
     for (const img of state.inputImages) stillUsed.add(img.id)
-    for (const imgId of targetImageIds) {
-      if (!stillUsed.has(imgId)) {
-        try { await deleteImage(imgId) } catch {}
-        imageCache.delete(imgId)
+    for (const t of targets) {
+      for (const id of [...(t.inputImageIds || []), ...(t.outputImages || [])]) {
+        if (!stillUsed.has(id)) imageCache.delete(id)
       }
     }
+    set({ tasks: remaining, selectedTaskIds: new Set<string>(), selectionMode: false })
 
     state.showToast(`已删除 ${ids.length} 条记录`, 'success')
   },

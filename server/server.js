@@ -345,8 +345,10 @@ async function callUpstreamImageApi(userId, payload) {
     });
   }
   if (apiSettings.provider !== 'openai') {
-    // TODO 自定义 HTTP provider 待实现，先按 OpenAI 兼容处理
-    console.warn(`[${new Date().toISOString()}] ⚠️  Provider "${apiSettings.provider}" 暂未实现，回退到 OpenAI 兼容路径`);
+    // 自定义 HTTP provider 后端尚未实现请求构造，直接报错避免静默走 OpenAI 兼容产生不可预期结果
+    const err = new Error(`Provider "${apiSettings.provider}" 尚未实现后端调用逻辑，请切换到 OpenAI 兼容或 fal.ai`);
+    err.statusCode = 400;
+    throw err;
   }
 
   return callOpenAIImageApi({
