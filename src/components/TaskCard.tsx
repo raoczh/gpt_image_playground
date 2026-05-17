@@ -9,6 +9,9 @@ interface Props {
   onEditOutputs: () => void
   onDelete: () => void
   onClick: () => void
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
 }
 
 export default function TaskCard({
@@ -17,6 +20,9 @@ export default function TaskCard({
   onEditOutputs,
   onDelete,
   onClick,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: Props) {
   const [thumbSrc, setThumbSrc] = useState<string>('')
   const [coverRatio, setCoverRatio] = useState<string>('')
@@ -81,13 +87,32 @@ export default function TaskCard({
 
   return (
     <div
-      className={`bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-lg ${
-        task.status === 'running'
-          ? 'border-blue-400 generating'
-          : 'border-gray-200 dark:border-white/[0.08]'
+      className={`bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-lg relative ${
+        selectionMode && selected
+          ? 'border-blue-500 ring-2 ring-blue-500/40'
+          : task.status === 'running'
+            ? 'border-blue-400 generating'
+            : 'border-gray-200 dark:border-white/[0.08]'
       }`}
-      onClick={onClick}
+      onClick={selectionMode ? onToggleSelect : onClick}
     >
+      {selectionMode && (
+        <div className="absolute top-2 left-2 z-20 pointer-events-none">
+          <div
+            className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${
+              selected
+                ? 'bg-blue-500 text-white'
+                : 'bg-white/90 dark:bg-gray-800/90 border border-gray-300 dark:border-white/20'
+            }`}
+          >
+            {selected && (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex h-40">
         {/* 左侧图片区域 */}
         <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">

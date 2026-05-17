@@ -170,6 +170,13 @@ export async function deleteTask(id: string): Promise<void> {
   await apiRequest(`/api/tasks/${id}`, { method: 'DELETE' });
 }
 
+export async function batchDeleteTasks(taskIds: string[]): Promise<{ deletedCount: number }> {
+  return apiRequest('/api/tasks/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ taskIds }),
+  });
+}
+
 export async function clearTasks(): Promise<void> {
   await apiRequest('/api/tasks', { method: 'DELETE' });
 }

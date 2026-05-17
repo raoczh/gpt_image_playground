@@ -928,6 +928,71 @@ app.put('/api/tasks/:id/favorite', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.taskIds)
+      ? req.body.taskIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 500)
+      : [];
+    if (!ids.length) return res.status(400).json({ error: 'taskIds is required' });
+
+    console.log(`[${new Date().toISOString()}] 🗑️  Batch delete - User ID: ${req.session.userId}, count=${ids.length}`);
+
+    // 先取出待删任务关联的图片 ID
+    const [taskRows] = await db.query(
+      'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+      [ids, req.session.userId]
+    );
+
+    if (!taskRows.length) {
+      return res.json({ success: true, deletedCount: 0 });
+    }
+
+    const targetIds = taskRows.map((t) => t.id);
+    const targetImageIds = new Set();
+    for (const t of taskRows) {
+      const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
+      const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
+      for (const id of (ii || [])) targetImageIds.add(id);
+      for (const id of (oi || [])) targetImageIds.add(id);
+    }
+
+    // 软删任务
+    await db.query(
+      'UPDATE tasks SET deleted_at = NOW() WHERE id IN (?) AND user_id = ?',
+      [targetIds, req.session.userId]
+    );
+
+    // 清理孤立图片
+    if (targetImageIds.size > 0) {
+      const [otherTasks] = await db.query(
+        'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
+        [req.session.userId]
+      );
+      const stillReferenced = new Set();
+      for (const t of otherTasks) {
+        const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
+        const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
+        for (const imgId of (ii || [])) stillReferenced.add(imgId);
+        for (const imgId of (oi || [])) stillReferenced.add(imgId);
+      }
+      const orphans = Array.from(targetImageIds).filter((imgId) => !stillReferenced.has(imgId));
+      if (orphans.length > 0) {
+        const [imgResult] = await db.query(
+          'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+          [orphans, req.session.userId]
+        );
+        console.log(`[${new Date().toISOString()}] 🗑️  Soft-deleted ${imgResult.affectedRows} orphan images`);
+      }
+    }
+
+    console.log(`[${new Date().toISOString()}] ✅ Batch deleted ${targetIds.length} tasks`);
+    res.json({ success: true, deletedCount: targetIds.length });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Batch delete error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;

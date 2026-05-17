@@ -12,6 +12,13 @@ export default function TaskGrid() {
   const tasksHasMore = useStore((s) => s.tasksHasMore)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const selectionMode = useStore((s) => s.selectionMode)
+  const selectedTaskIds = useStore((s) => s.selectedTaskIds)
+  const setSelectionMode = useStore((s) => s.setSelectionMode)
+  const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
+  const selectAllTasks = useStore((s) => s.selectAllTasks)
+  const clearTaskSelection = useStore((s) => s.clearTaskSelection)
+  const batchDeleteSelected = useStore((s) => s.batchDeleteSelected)
 
   // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite 变化时 debounce reload。
   // 用 ref 跳过首次 effect 避免重复请求。
@@ -85,6 +92,56 @@ export default function TaskGrid() {
 
   return (
     <>
+      {/* 多选工具栏 */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        {selectionMode ? (
+          <>
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <span className="font-medium">已选 {selectedTaskIds.size}</span>
+              <button
+                type="button"
+                onClick={() => selectAllTasks()}
+                className="text-xs text-blue-500 hover:text-blue-600"
+              >全选</button>
+              <button
+                type="button"
+                onClick={() => clearTaskSelection()}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >清空</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedTaskIds.size === 0}
+                onClick={() =>
+                  setConfirmDialog({
+                    title: '批量删除',
+                    message: `确定要删除选中的 ${selectedTaskIds.size} 条记录吗？相关图片资源也会被清理。`,
+                    action: () => { batchDeleteSelected().catch(console.error) },
+                  })
+                }
+                className="px-3 py-1.5 rounded-lg text-xs bg-red-500 text-white hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >删除选中</button>
+              <button
+                type="button"
+                onClick={() => setSelectionMode(false)}
+                className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 dark:border-white/[0.08] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.04] transition"
+              >退出选择</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="text-xs text-gray-400 dark:text-gray-500">{tasks.length > 0 ? `${tasks.length} 条记录` : ''}</span>
+            <button
+              type="button"
+              onClick={() => setSelectionMode(true)}
+              disabled={tasks.length === 0}
+              className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 dark:border-white/[0.08] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.04] disabled:opacity-40 transition"
+            >多选</button>
+          </>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {sortedTasks.map((task) => (
           <TaskCard
@@ -94,6 +151,9 @@ export default function TaskGrid() {
             onReuse={() => reuseConfig(task)}
             onEditOutputs={() => editOutputs(task)}
             onDelete={() => handleDelete(task)}
+            selectionMode={selectionMode}
+            selected={selectedTaskIds.has(task.id)}
+            onToggleSelect={() => toggleTaskSelection(task.id)}
           />
         ))}
       </div>

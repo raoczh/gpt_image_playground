@@ -122,6 +122,14 @@ interface AppState {
   filterFavorite: boolean
   setFilterFavorite: (favorite: boolean) => void
   toggleTaskFavorite: (taskId: string) => Promise<void>
+  // 批量选择
+  selectionMode: boolean
+  selectedTaskIds: Set<string>
+  setSelectionMode: (mode: boolean) => void
+  toggleTaskSelection: (id: string) => void
+  selectAllTasks: () => void
+  clearTaskSelection: () => void
+  batchDeleteSelected: () => Promise<void>
 
   // UI
   detailTaskId: string | null
@@ -238,6 +246,62 @@ export const useStore = create<AppState>()(
       useStore.getState().showToast('收藏操作失败', 'error')
       throw error
     }
+  },
+  selectionMode: false,
+  selectedTaskIds: new Set<string>(),
+  setSelectionMode: (selectionMode) =>
+    set((s) =>
+      selectionMode === s.selectionMode
+        ? s
+        : { selectionMode, selectedTaskIds: selectionMode ? s.selectedTaskIds : new Set<string>() },
+    ),
+  toggleTaskSelection: (id) =>
+    set((s) => {
+      const next = new Set(s.selectedTaskIds)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return { selectedTaskIds: next }
+    }),
+  selectAllTasks: () =>
+    set((s) => ({ selectedTaskIds: new Set(s.tasks.map((t) => t.id)) })),
+  clearTaskSelection: () => set({ selectedTaskIds: new Set<string>() }),
+  batchDeleteSelected: async () => {
+    const state = useStore.getState()
+    const ids = Array.from(state.selectedTaskIds)
+    if (!ids.length) return
+    const targets = state.tasks.filter((t) => ids.includes(t.id))
+    try {
+      await backendApi.batchDeleteTasks(ids)
+    } catch (error) {
+      console.error('Batch delete failed:', error)
+      state.showToast('批量删除失败', 'error')
+      throw error
+    }
+
+    // 清理本地引用
+    const remaining = state.tasks.filter((t) => !state.selectedTaskIds.has(t.id))
+    set({ tasks: remaining, selectedTaskIds: new Set<string>(), selectionMode: false })
+
+    // 收集被删任务的图片，删除孤立的
+    const targetImageIds = new Set<string>()
+    for (const t of targets) {
+      for (const id of t.inputImageIds || []) targetImageIds.add(id)
+      for (const id of t.outputImages || []) targetImageIds.add(id)
+    }
+    const stillUsed = new Set<string>()
+    for (const t of remaining) {
+      for (const id of t.inputImageIds || []) stillUsed.add(id)
+      for (const id of t.outputImages || []) stillUsed.add(id)
+    }
+    for (const img of state.inputImages) stillUsed.add(img.id)
+    for (const imgId of targetImageIds) {
+      if (!stillUsed.has(imgId)) {
+        try { await deleteImage(imgId) } catch {}
+        imageCache.delete(imgId)
+      }
+    }
+
+    state.showToast(`已删除 ${ids.length} 条记录`, 'success')
   },
 
   // UI
