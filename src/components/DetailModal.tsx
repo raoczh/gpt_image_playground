@@ -186,7 +186,7 @@ export default function DetailModal() {
               <img
                 ref={mainImageRef}
                 src={currentOutputImageSrc}
-                className="max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
+                className="saveable-image max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
                 onLoad={() => {
                   const panel = imagePanelRef.current
                   const image = mainImageRef.current

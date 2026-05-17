@@ -391,7 +391,7 @@ function LightboxInner({ src, onClose, showNav, currentIndex, total, onPrev, onN
       <div className="relative animate-zoom-in">
         <img
           src={src}
-          className="max-w-[85vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
+          className="saveable-image max-w-[85vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
           style={{
             transform: `translate(${tx}px, ${ty}px) scale(${s})`,
             transition: isDragging ? 'none' : 'transform 0.2s ease-out',

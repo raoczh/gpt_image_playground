@@ -14,6 +14,11 @@ export default function ImageContextMenu() {
         // 忽略没有 src 或空的 img
         if (!imgTarget.src) return
 
+        // iOS 触控设备上放行原生长按菜单（含「存储图像」）
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+        const isTouch = window.matchMedia('(pointer: coarse)').matches
+        if (isIOS && isTouch) return
+
         e.preventDefault()
         setMenuInfo({
           src: imgTarget.src,

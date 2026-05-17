@@ -19,8 +19,8 @@ export default function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
-      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+    <header className="safe-area-top sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
+      <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
         <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 tracking-tight">
           GPT Image Playground
         </h1>
