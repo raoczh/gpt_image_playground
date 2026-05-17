@@ -410,3 +410,123 @@ git commit
 | R-9 | P1 | U4-2 双阶段加载副作用：右键复制/下载图片时拿到 `<img>` 的 `src`，这时可能还是缩略图（256px webp），用户复制/下载到的不是原图 | [ImageContextMenu](../src/components/ImageContextMenu.tsx) 优先读 `dataset.originalSrc`；[TaskCard](../src/components/TaskCard.tsx) 主图、[DetailModal](../src/components/DetailModal.tsx) 主图 + 输入图缩略图都加上 `data-original-src` |
 
 所有改动 `npx tsc --noEmit` 通过。涉及文件：[server/db.js](../server/db.js)、[server/server.js](../server/server.js)、[src/store.ts](../src/store.ts)、[src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx)、[src/components/DetailModal.tsx](../src/components/DetailModal.tsx)、[src/components/SettingsModal.tsx](../src/components/SettingsModal.tsx)、[src/components/InputBar.tsx](../src/components/InputBar.tsx)、[src/components/TaskGrid.tsx](../src/components/TaskGrid.tsx)。
+
+---
+
+## 十五、上游 vs 本分支 - 详细功能差异（2026-05-17 调研）
+
+> 用户决定**不做整体合并**，改为按需手动添加功能。本节是逐项落地清单。
+> 已实现 / 主动撤回 / 已知不做的项已剔除，下面列的都是**还能从上游搬过来的具体功能**。
+> 工作量估算的"d"指人日（按 6 小时算）。
+
+### A. 用户能看到的功能差异
+
+| ID | 功能 | 上游做了什么（含定位） | 本分支现状 | 建议 | 工作量 |
+|---|---|---|---|---|---|
+| **A-1** | Header 三件套：PWA 安装 / 操作指南入口 / 版本更新 NEW 徽章 | [Header.tsx:42-91](../src/components/Header.tsx#L42) 监听 `beforeinstallprompt` 弹安装按钮（iOS/微信浏览器降级为文字提示）；问号按钮打开 `HelpModal`；`useVersionCheck()` 拉 GitHub Releases，新版本显示红色 NEW 徽章 | 完全没有。[HelpModal.tsx](../src/components/HelpModal.tsx) 已 cherry-pick 但**无任何入口**，是死代码 | ✅ **做** | 0.5d |
+| **A-2** | DetailModal 错误态三件套：复制错误 / 查看原始响应 / 复制图片 URL；完成态加"重试" | DetailModal 错误区增加 3 圆形按钮：① `copyTextToClipboard` 复制完整错误文本 ② `task.rawResponsePayload` 弹模态展示原始响应 ③ `task.rawImageUrls` 复制原始外链。完成态加"重试"按钮（受 `settings.alwaysShowRetryButton` 控制） | 出错只显示文本 + 删除按钮，没有重试 | ✅ **做** | 0.3d 前端 + 0.1d 后端加 `raw_response_payload`/`raw_image_urls` 两列 |
+| **A-3** | InputBar @图N 提示词图片引用（@mention） | [promptImageMentions.ts](../src/lib/promptImageMentions.ts) 完整解析；InputBar 从 textarea 改为 `contentEditable`，输入 `@` 弹下拉，发送时 `@图1` → `[image 1]`；参考图重排/删除自动 remap | 纯 textarea | ⏸ **暂缓**（U2-1，工作量大、本分支拖拽逻辑需重写） | 1-2d |
+| **A-4** | TaskCard 卡片显示"API 配置名 + 模型 + 局部重绘"标签 + 请求 vs 实际值徽章 | [TaskCard.tsx:403-462](../src/components/TaskCard.tsx#L403) 用 [paramDisplay.tsx](../src/lib/paramDisplay.tsx) 对比 `task.params` vs `task.actualParams`，不一致显示 `<ActualValueBadge>`（黄色高亮 + tooltip "API 实际响应值"） | 卡片只显示请求时的参数，看不出 API 是否改写了 size/quality 等 | ✅ **做**（捕获"请求 4K 但实际 2K"这种隐蔽 bug） | 0.5d（含 B-2 表结构） |
+| **A-5** | DetailModal 显示 API 改写后的提示词（revised_prompt） | 检测 `task.revisedPromptByImage[currentImageId]`，与原 prompt 不同则展示提示 | 没有 | ✅ **做**（与 A-4 同批做更顺手） | 0.2d |
+| **A-6** | SettingsModal 四 tab 侧栏布局 + 五个体验开关 | 改为左侧栏 + 右侧 tab。"习惯配置" tab 增加：① Enter vs Ctrl+Enter 提交 ② 提交后清空输入框 ③ 重启后加载上次输入 ④ 复用配置时临时复用任务 Profile ⑤ 始终显示重试按钮 | 单页布局，没有这五个开关 | ✅ **做**（高频用户痛点） | 0.5d |
+| **A-7** | SettingsModal "自定义 HTTP Provider 模板"管理面板 | 完整 CRUD + JSON Manifest 编辑器 + 内置示例 + LLM 提示词模板（75 行生成 manifest）+ "复制导入 URL"分享功能 | `customProviders` schema 已就位但无管理 UI | ⏸ **简化版**：只做"复制导入 URL"分享 + JSON 导入按钮（2h）；完整面板（2-3d）暂缓 | 0.3d 简化版 |
+| **A-8** | SizePickerModal 限制提示 + 超限 clamp 徽章 | 显示 `SIZE_LIMIT_TEXT`（宽高 16 倍数 / 最大边 3840 / 比例 ≤3:1 / 总像素 655360-8294400），超限时显示 `isClamped` 徽章和 hint tooltip | 没有限制提示 | ✅ **做**（用户经常踩坑） | 0.1d |
+| **A-9** | SearchBar 收藏按钮位置调整 | 收藏按钮挪到状态选择器左侧，整体更紧凑 | 收藏按钮在右侧 | ❌ **不做**（纯样式偏好） | — |
+| **A-10** | Lightbox 显示蒙版叠层预览 | 检测到该图被用作蒙版目标时，叠加半透明红色 mask 区域可视化 | Lightbox 不显示蒙版预览 | ✅ **做**（U1-1 的天然补充） | 0.2d |
+| **A-11** | ImageContextMenu 增加"编辑"按钮（图片→参考图） | "复制 / 下载"之外加"编辑"，点击 `addImageFromUrl()` 把当前图加入 inputImages，关闭所有模态返回主界面；iframe 内禁用菜单 | 只有复制/下载 | ✅ **做**（"基于已有图二次编辑"最便捷入口） | 0.1d |
+| **A-12** | Toast 栈（同时显示多条） | `toasts: ToastItem[]` 数组，每条独立 fade-in/out | 单条 toast，新的会覆盖旧的 | ✅ **做**（批量操作时单 toast 会被覆盖） | 0.1d |
+| **A-13** | SupportPromptModal "感谢使用"弹窗（50 张引导赞助原作者） | 累计成功 50 张图后自动弹一次引导赞助/反馈 | 没有 | ❌ **不做**（私域部署不适合引导赞助原作者） | — |
+| **A-14** | ConfirmDialog 增强：icon / 强制冷静期 / 富文本 / tone 色彩 | 支持 `icon: 'info'\|'copy'`、`minConfirmDelayMs` 强制延迟点确认、`tone: 'danger'\|'warning'`、message 中 `` `xxx` `` 渲染为内联代码、`「xxx」`加粗 | 基础版可用，无以上能力 | ⚠️ **按需做**（除非有"高危操作"场景，否则可不动） | 0.2d |
+
+### B. 后台 / 数据层差异
+
+| ID | 功能 | 上游做了什么 | 本分支现状 | 建议 | 工作量 |
+|---|---|---|---|---|---|
+| **B-1** | Query String 完整参数：`?settings=` `?apiMode=` `?model=` 一键导入 | [urlSettings.ts](../src/lib/urlSettings.ts) 122 行 + 测试 243 行。`?settings=<JSON>` 导入完整 providers + profiles；与现有 profile 去重；临时 profile 自动激活 | 仅识别 `?apiUrl=&apiKey=` | ✅ **做**（如果 A-7 简化版做了，B-1 是配套） | 0.2d |
+| **B-2** | tasks 表新增 `actual_params` / `revised_prompt_by_image` / `raw_image_urls` / `raw_response_payload` | 配合 A-4 / A-5 / A-2 | 没有 | ✅ **做**（A-4/A-5 的前置依赖） | 已含在 A-4/A-5 工作量里 |
+| **B-3** | Codex CLI 兼容模式提示 + "不再提示"持久化 | 用 OpenAI 但响应缺关键字段时提示可能是 codex CLI，可"以后不再提示" | 没有 | ❌ **不做**（受众极小） | — |
+| **B-4** | 临时复用任务的 API Profile（`reuseTaskApiProfileTemporarily`） | 复用历史任务时根据 `settings.reuseTaskApiProfileTemporarily` 临时切到该任务当时的 profile；找不到时警告 | 没有 | ✅ **做**（多 profile 用户的高价值场景） | 0.2d |
+| **B-5** | fal.ai provider | 已主动撤回 | — | ❌ — | — |
+| **B-6** | Service Worker 启用 | 生产环境注册 sw.js 离线缓存 | 主动 `unregister()` | ❌ **不做**（后端鉴权模式不适合 SW） | — |
+| **B-7** | Docker `API_URL` → `DEFAULT_API_URL` / `API_PROXY_URL` 拆分迁移提示 | useDockerApiUrlMigrationNotice hook 引导升级 | 本分支宝塔部署不适用 | ❌ **不做** | — |
+| **B-8** | `imageApiShared.ts` 输入大小校验 helper（512MB 总量、50MB 蒙版） | 抽离 isHttpUrl/isDataUrl/normalizeBase64Image | 本分支校验在后端做 | ❌ **不做**（重复劳动） | — |
+
+### C. 开发体验 / 工程化差异
+
+| ID | 项 | 上游做了什么 | 建议 | 工作量 |
+|---|---|---|---|---|
+| **C-1** | Vitest 单元测试 | `api.test.ts` `apiProfiles.test.ts` `mask.test.ts` `maskPreprocess.test.ts` `paramCompatibility.test.ts` `promptImageMentions.test.ts` `store.test.ts` `urlSettings.test.ts` `viewportTransform.test.ts` `devProxy.test.ts` 等共 ~2000 行 | ⚠️ **挑做**：至少把 `mask.test.ts` + `viewportTransform.test.ts` 拿过来（蒙版逻辑容易出 bug） | 0.2d 关键测试 |
+| **C-2** | `scripts/mock-image-api.mjs` 本地 mock 服务器 | 280 行，便于开发不消耗真实 API 额度 | ✅ **做**（开发体验提升） | 0.2d |
+| **C-3** | `lib/runtimeEnv.ts` + Docker 二级注入 | 本分支自有架构不需要 | ❌ — | — |
+| **C-4** | GitHub Actions Vercel tag deploy | 本分支宝塔部署 | ❌ — | — |
+
+---
+
+## 十六、补充优化建议（按推荐优先级）
+
+基于上节调研，推荐分三批落地。**总工作量约 3-4 个工日**（不含 A-3 @mention 那个大改造）。
+
+### 第一批：高 ROI 小改动（合计 ~1d）
+
+> 用户体验直接提升，每项 2-3 小时之内
+
+1. **A-1 Header 三件套**（0.5d）— PWA 安装按钮 + HelpModal 入口 + 版本 NEW 徽章。注意 PWA 安装按钮跟本分支 SW unregister 策略不冲突（`beforeinstallprompt` 不依赖 SW 注册）。`useVersionCheck` 已删除，需要从上游重新拉过来并改为读环境变量配置的版本号（避免硬依赖 GitHub Releases）。
+2. **A-8 SizePickerModal 限制提示**（0.1d）— 直接拷贝 `SIZE_LIMIT_TEXT` 常量 + clamp 徽章。
+3. **A-10 Lightbox 蒙版叠层**（0.2d）— 跟 U1-1 Mask Editor 配套。
+4. **A-11 ImageContextMenu 加"编辑"按钮**（0.1d）— 用本分支已有的 `addImageFromUrl`，关闭所有模态返回主界面即可。
+5. **A-12 Toast 栈**（0.1d）— store 改 `toasts: ToastItem[]`，Toast 组件渲染数组。
+
+### 第二批：需要后端配合的功能（合计 ~1.5d）
+
+> 都要扩 tasks 表 schema，建议一波改完一次 migration
+
+6. **B-2 + A-4 + A-5：参数追踪三件套**（合计 ~1d）
+   - 后端：`tasks` 表加 `actual_params JSON` / `revised_prompt_by_image JSON` 两列 + migration `005_add_param_tracking.sql` + `db.js` 自动 ALTER
+   - 后端：`callUpstreamImageApi` 解析 OpenAI 响应里的 `usage / size / quality` 等回写到 actual_params
+   - 前端：拷贝 [paramDisplay.tsx](../src/lib/paramDisplay.tsx) + [paramCompatibility.ts](../src/lib/paramCompatibility.ts)，TaskCard 渲染徽章，DetailModal 显示 revised_prompt
+7. **A-2 错误态三件套 + 重试**（0.3d）
+   - 后端：`tasks` 表加 `raw_response_payload LONGTEXT` / `raw_image_urls JSON`（同一 migration）
+   - 前端：DetailModal 错误区加 3 按钮 + 完成态加重试按钮
+8. **B-4 临时复用任务 API Profile**（0.2d）— 后端 Profile 多配置已就位，前端 `reuseConfig` 加临时切换逻辑
+
+### 第三批：体验完善（合计 ~1d）
+
+9. **A-6 Settings 四 tab 布局 + 五个开关**（0.5d）— 五个开关需要存到 `user_settings.settings` JSON 里：`enterSubmit / clearInputAfterSubmit / persistInputOnRestart / reuseTaskApiProfileTemporarily / alwaysShowRetryButton`
+10. **A-7 简化版：Profile 分享 URL + JSON 导入**（0.3d）— 不做完整自定义 provider 面板，只做"复制当前 Profile 为分享链接" + "粘贴 JSON 导入"
+11. **B-1 Query String `?settings=` 完整参数**（0.2d）— 配合 A-7 分享 URL；拷贝 [urlSettings.ts](../src/lib/urlSettings.ts) + App.tsx 入口
+12. **A-14 ConfirmDialog 增强**（按需）— 仅在出现"高危操作"需求时再做
+
+### 暂缓 / 不做的项
+
+| ID | 决定 | 理由 |
+|---|---|---|
+| A-3 @mention | 暂缓 | InputBar 重写工作量大（1-2d），收益局限在多图编辑场景 |
+| A-7 完整自定义 provider 面板 | 暂缓 | 2-3d 工作量，受众小，简化版已覆盖核心需求 |
+| A-9 SearchBar 布局 | 不做 | 纯样式偏好 |
+| A-13 赞助引导弹窗 | 不做 | 私域部署不引导赞助原作者 |
+| B-3 Codex CLI 提示 | 不做 | 受众极小 |
+| B-6/B-7/B-8 / C-3/C-4 | 不做 | 跟本分支后端化方向冲突或重复劳动 |
+| C-1 完整测试套件 | 部分做 | 只拷 mask.test.ts + viewportTransform.test.ts（最易出 bug 的） |
+
+### 工程化辅助（合计 ~0.4d）
+
+13. **C-2 本地 mock API 脚本**（0.2d）— 开发时省 API 额度
+14. **C-1 关键测试拷贝**（0.2d）— 拷贝 mask.test.ts + viewportTransform.test.ts，运行 vitest 验证本分支的 mask 实现
+
+### 实施建议
+
+- **如果时间紧**：只做第一批（5 项，1d）+ B-4（0.2d）。这些都是"小而美"的体验改进。
+- **如果想达到上游核心功能对齐**：第一批 + 第二批（合计 2.5d），覆盖参数追踪、错误态友好、Profile 复用。
+- **完整对齐**：再加第三批（合计 3.5-4d）。
+- **不建议追求 100% 对齐**——A-3 @mention 不做、A-7 自定义 provider 完整面板不做，已经能覆盖 95% 的用户场景。
+
+### 新对话恢复指引（更新）
+
+未来要做这些项时，让新 Claude：
+
+1. 读 [docs/upstream-merge-plan.md](upstream-merge-plan.md) §十五 + §十六
+2. 选定 A-x 或 B-x 项目
+3. 上游代码定位：`git show main:<file>` 看上游实现
+4. 按 §十六 第二批/第三批的"实施方式"提示动手
+5. 每完成一项 commit message 用 `feat(upstream): A-x <功能名>` 前缀
+6. 在 §十六 对应项加 ✅ 标记完成时间和 commit hash
