@@ -32,6 +32,9 @@ export default function DetailModal() {
 
   const currentOutputImageId = task?.outputImages?.[imageIndex] || ''
   const currentOutputImageSrc = currentOutputImageId
+  const currentOutputThumbSrc = task?.outputThumbnails?.[imageIndex] || ''
+  // 详情预览优先用缩略图（解码代价低），不可用时回退到完整图
+  const currentOutputPreviewSrc = currentOutputThumbSrc || currentOutputImageSrc
 
   useEffect(() => {
     if (!currentOutputImageId || !currentOutputImageSrc) return
@@ -81,7 +84,7 @@ export default function DetailModal() {
     updateImageLabelLeft()
     window.addEventListener('resize', updateImageLabelLeft)
     return () => window.removeEventListener('resize', updateImageLabelLeft)
-  }, [currentOutputImageSrc])
+  }, [currentOutputPreviewSrc])
 
   if (!task) return null
 
@@ -185,7 +188,7 @@ export default function DetailModal() {
             <>
               <img
                 ref={mainImageRef}
-                src={currentOutputImageSrc}
+                src={currentOutputPreviewSrc}
                 className="saveable-image max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
                 onLoad={() => {
                   const panel = imagePanelRef.current
