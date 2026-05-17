@@ -15,7 +15,14 @@
       "Bash(docker image *)",
       "Bash(grep -E \"\\\\.\\(go|js|sql\\)$\")",
       "Bash(ls -la D:/workspace/new-api 2>/dev/null | head -30)",
-      "Read(//d/workspace/new-api/**)"
+      "Read(//d/workspace/new-api/**)",
+      "Bash(git ls-tree *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git diff *)",
+      "Bash(git checkout *)",
+      "Bash(node -c *)"
     ]
   }
 }

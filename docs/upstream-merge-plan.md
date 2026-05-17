@@ -380,31 +380,31 @@
 
 > 用户体验直接提升，每项 2-3 小时之内
 
-1. **A-1 Header 三件套**（0.5d）— PWA 安装按钮 + HelpModal 入口 + 版本 NEW 徽章。注意 PWA 安装按钮跟本分支 SW unregister 策略不冲突（`beforeinstallprompt` 不依赖 SW 注册）。`useVersionCheck` 已删除，需要从上游重新拉过来并改为读环境变量配置的版本号（避免硬依赖 GitHub Releases）。
-2. **A-8 SizePickerModal 限制提示**（0.1d）— 直接拷贝 `SIZE_LIMIT_TEXT` 常量 + clamp 徽章。
-3. **A-10 Lightbox 蒙版叠层**（0.2d）— 跟 U1-1 Mask Editor 配套。
-4. **A-11 ImageContextMenu 加"编辑"按钮**（0.1d）— 用本分支已有的 `addImageFromUrl`，关闭所有模态返回主界面即可。
-5. **A-12 Toast 栈**（0.1d）— store 改 `toasts: ToastItem[]`，Toast 组件渲染数组。
+1. **A-1 Header PWA 安装 + HelpModal 入口**（0.5d）— ✅ 2026-05-17 完成 — `feat(upstream): A-1 Header 加 PWA 安装与 HelpModal 入口`。**未做 versionCheck**（用户决策：不引入 GitHub Releases 轮询，避免无外网/私域部署场景下的无效请求）。PWA 安装按钮监听 `beforeinstallprompt`，iOS/微信走文字提示。
+2. **A-8 SizePickerModal 限制提示**（0.1d）— ✅ 2026-05-17 完成 — `feat(upstream): A-8 SIZE_LIMIT_TEXT + clamp 徽章`。
+3. **A-10 Lightbox 蒙版叠层**（0.2d）— ✅ 2026-05-17 完成 — Lightbox 拿 store 里的 `maskDraft`，匹配到目标参考图时叠加 mask 图层 + "蒙版预览"角标。
+4. **A-11 ImageContextMenu 加"编辑"按钮**（0.1d）— ✅ 2026-05-17 完成 — 新增 `addImageFromUrl()` action，右键菜单第三个按钮调用后关闭所有模态返回主界面。
+5. **A-12 Toast 栈**（0.1d）— ✅ 已在本分支既有实现（store.toasts: ToastItem[]），无需额外改造。
 
 ### 第二批：需要后端配合的功能（合计 ~1.5d）
 
 > 都要扩 tasks 表 schema，建议一波改完一次 migration
 
-6. **B-2 + A-4 + A-5：参数追踪三件套**（合计 ~1d）
-   - 后端：`tasks` 表加 `actual_params JSON` / `revised_prompt_by_image JSON` 两列 + migration `005_add_param_tracking.sql` + `db.js` 自动 ALTER
-   - 后端：`callUpstreamImageApi` 解析 OpenAI 响应里的 `usage / size / quality` 等回写到 actual_params
-   - 前端：拷贝 [paramDisplay.tsx](../src/lib/paramDisplay.tsx) + [paramCompatibility.ts](../src/lib/paramCompatibility.ts)，TaskCard 渲染徽章，DetailModal 显示 revised_prompt
-7. **A-2 错误态三件套 + 重试**（0.3d）
-   - 后端：`tasks` 表加 `raw_response_payload LONGTEXT` / `raw_image_urls JSON`（同一 migration）
-   - 前端：DetailModal 错误区加 3 按钮 + 完成态加重试按钮
-8. **B-4 临时复用任务 API Profile**（0.2d）— 后端 Profile 多配置已就位，前端 `reuseConfig` 加临时切换逻辑
+6. **B-2 + A-4 + A-5：参数追踪三件套**（合计 ~1d）— ✅ 2026-05-17 完成
+   - 后端：`tasks` 表新增 `actual_params` / `revised_prompt_by_image` / `raw_response_payload` / `raw_image_urls`；db.js 自检；migration `005_add_param_tracking.sql`
+   - 后端：`callOpenAIImageApi` 解析 Responses/Images 响应里的 `revised_prompt` / `size` / `quality` 等回写
+   - 前端：新增 `src/lib/paramDisplay.ts`，TaskCard 用徽章对比（mismatched 时 amber 高亮），DetailModal 顶部显示 revised_prompt
+7. **A-2 错误态三件套 + 重试**（0.3d）— ✅ 2026-05-17 完成
+   - 后端：上游错误同步落 `raw_response_payload`；done/error 路径都写 profile 快照
+   - 前端：DetailModal 错误态新增"复制错误 / 查看原始响应 / 复制图片 URL"3 按钮 + 完成态可选"重试"按钮（受 `alwaysShowRetryButton` 控制）；新增 `retryTask()` action
+8. **B-4 临时复用任务 API Profile**（0.2d）— ✅ 2026-05-17 完成 — 后端 done/error 都写 `api_profile_id/name/provider/model` 快照；前端 `reuseConfig` 与 `retryTask` 在 `settings.reuseTaskApiProfileTemporarily` 开启时按 task.apiProfileId 临时切换 activeProfileId
 
 ### 第三批：体验完善（合计 ~1d）
 
-9. **A-6 Settings 四 tab 布局 + 五个开关**（0.5d）— 五个开关需要存到 `user_settings.settings` JSON 里：`enterSubmit / clearInputAfterSubmit / persistInputOnRestart / reuseTaskApiProfileTemporarily / alwaysShowRetryButton`
-10. **A-7 简化版：Profile 分享 URL + JSON 导入**（0.3d）— 不做完整自定义 provider 面板，只做"复制当前 Profile 为分享链接" + "粘贴 JSON 导入"
-11. **B-1 Query String `?settings=` 完整参数**（0.2d）— 配合 A-7 分享 URL；拷贝 [urlSettings.ts](../src/lib/urlSettings.ts) + App.tsx 入口
-12. **A-14 ConfirmDialog 增强**（按需）— 仅在出现"高危操作"需求时再做
+9. **A-6 五个习惯开关**（0.5d）— ✅ 2026-05-17 完成 — 5 个开关存到 `AppSettings`（localStorage 持久化）：`enterSubmit / clearInputAfterSubmit / persistInputOnRestart / reuseTaskApiProfileTemporarily / alwaysShowRetryButton`。SettingsModal 新增"习惯配置"section + 复用的 `ToggleRow` 组件。**未做四 tab 布局**：本分支 SettingsModal 是单列滚动结构，按 section 切分已经足够，全面 tab 重构性价比低。
+10. **A-7 简化版：Profile 分享 URL + JSON 导入**（0.3d）— ✅ 2026-05-17 完成 — 新增 `src/lib/urlSettings.ts`（base64-url 编解码 + `parseImportInput`）；SettingsModal Profile section 新增"分享链接 / 导入 Profile"按钮。分享链接**不含 API Key**。
+11. **B-1 Query String `?settings=` 完整参数**（0.2d）— ✅ 2026-05-17 完成 — App.tsx 初始化时解析 `?settings=` 解码后调 `createProfile` 自动落库，并清掉 URL 参数。
+12. **A-14 ConfirmDialog 增强**（按需）— ⏳ 未做（无高危操作场景）。
 
 ### 暂缓 / 不做的项
 
@@ -420,8 +420,8 @@
 
 ### 工程化辅助（合计 ~0.4d）
 
-13. **C-2 本地 mock API 脚本**（0.2d）— 开发时省 API 额度
-14. **C-1 关键测试拷贝**（0.2d）— 拷贝 mask.test.ts + viewportTransform.test.ts，运行 vitest 验证本分支的 mask 实现
+13. **C-2 本地 mock API 脚本**（0.2d）— ✅ 2026-05-17 完成 — `scripts/mock-image-api.mjs`（纯 Node http，无新依赖）。覆盖 generations / edits / responses 三端点，随机改写 prompt + actual size 便于联调 A-4/A-5。
+14. **C-1 关键测试拷贝**（0.2d）— ⏳ 暂缓 — 本分支未引入 vitest，引入 `vitest + jsdom` 需要新增 devDependencies 并改 ci 配置。先记录在此，留待后续启用测试栈时一次性补齐。
 
 ### 实施建议
 
