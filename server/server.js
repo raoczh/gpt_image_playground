@@ -307,9 +307,13 @@ async function loadInputImageDataUrls(userId, inputImageIds) {
   return dataUrls;
 }
 
-async function callUpstreamImageApi(userId, payload) {
+async function callUpstreamImageApi(userId, payload, ctx) {
   console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}, profileId=${payload.profileId || 'default'}`);
   const apiSettings = await loadUserApiSettings(userId, payload.profileId || null);
+  // 把已加载的 profile 信息回写出去（task 快照）
+  if (ctx) {
+    ctx.apiSettings = apiSettings;
+  }
   const baseUrl = normalizeBaseUrl(apiSettings.baseUrl);
 
   console.log(`[${new Date().toISOString()}] ⚙️  API Config - Provider: ${apiSettings.provider}, BaseURL: ${baseUrl}, Model: ${apiSettings.model}, Timeout: ${apiSettings.timeout}s, Format: ${apiSettings.apiFormat}`);
@@ -422,9 +426,20 @@ async function callOpenAIImageApi(opts) {
     }
 
     const images = [];
+    const revisedPrompts = [];
+    const actualParamsCollected = {};
     for (const item of outputs) {
       if (item.type === 'image_generation_call' && item.result) {
         images.push(normalizeBase64Image(item.result, mime));
+        if (typeof item.revised_prompt === 'string' && item.revised_prompt) {
+          revisedPrompts.push(item.revised_prompt);
+        }
+        // 收集 API 实际响应里的 size / quality / output_format 等参数
+        for (const key of ['size', 'quality', 'output_format', 'output_compression', 'moderation']) {
+          if (item[key] !== undefined && actualParamsCollected[key] === undefined) {
+            actualParamsCollected[key] = item[key];
+          }
+        }
       }
     }
 
@@ -432,7 +447,13 @@ async function callOpenAIImageApi(opts) {
       throw new Error('接口未返回可用图片数据');
     }
 
-    return { images };
+    return {
+      images,
+      actualParams: Object.keys(actualParamsCollected).length > 0 ? actualParamsCollected : null,
+      revisedPrompts: revisedPrompts.length > 0 ? revisedPrompts : null,
+      rawPayload: payloadJson,
+      rawImageUrls: null,
+    };
   }
 
   let response;
@@ -537,7 +558,15 @@ async function callOpenAIImageApi(opts) {
   }
 
   const images = [];
+  const rawImageUrls = [];
+  const revisedPrompts = [];
   for (const item of data) {
+    if (typeof item.revised_prompt === 'string' && item.revised_prompt) {
+      revisedPrompts.push(item.revised_prompt);
+    }
+    if (typeof item.url === 'string' && /^https?:\/\//i.test(item.url)) {
+      rawImageUrls.push(item.url);
+    }
     if (item.b64_json) {
       images.push(normalizeBase64Image(item.b64_json, mime));
       continue;
@@ -551,7 +580,19 @@ async function callOpenAIImageApi(opts) {
     throw new Error('接口未返回可用图片数据');
   }
 
-  return { images };
+  // images/edits 和 images/generations 响应里 size/quality 通常以 payload 顶层字段返回
+  const actualParams = {};
+  for (const key of ['size', 'quality', 'output_format', 'output_compression', 'moderation']) {
+    if (payloadJson[key] !== undefined) actualParams[key] = payloadJson[key];
+  }
+
+  return {
+    images,
+    actualParams: Object.keys(actualParams).length > 0 ? actualParams : null,
+    revisedPrompts: revisedPrompts.length > 0 ? revisedPrompts : null,
+    rawPayload: payloadJson,
+    rawImageUrls: rawImageUrls.length > 0 ? rawImageUrls : null,
+  };
 }
 
 // Redis 客户端
@@ -834,6 +875,75 @@ app.post('/api/settings', requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Update settings error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== 用户偏好（A-6 习惯开关） ====================
+// 偏好持久化到 user_settings.settings JSON 的 preferences 子对象
+// 与 API 配置（base_url/api_key）分离，避免互相影响
+//
+// 默认值与前端 DEFAULT_SETTINGS 保持一致；后端只透传，不做业务校验
+const PREFERENCE_KEYS = [
+  'enterSubmit',
+  'clearInputAfterSubmit',
+  'persistInputOnRestart',
+  'reuseTaskApiProfileTemporarily',
+  'alwaysShowRetryButton',
+];
+
+function pickPreferences(input) {
+  if (!input || typeof input !== 'object') return {};
+  const out = {};
+  for (const key of PREFERENCE_KEYS) {
+    if (typeof input[key] === 'boolean') out[key] = input[key];
+  }
+  return out;
+}
+
+app.get('/api/preferences', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT settings FROM user_settings WHERE user_id = ?',
+      [req.session.userId]
+    );
+    const raw = rows[0]?.settings;
+    const parsed = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : {};
+    const prefs = pickPreferences(parsed?.preferences);
+    res.json({ preferences: prefs });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Get preferences error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/preferences', requireAuth, async (req, res) => {
+  try {
+    const incoming = pickPreferences(req.body?.preferences);
+
+    // 读现有 settings JSON，合并 preferences 子对象后写回，避免覆盖其他字段（model/timeout/apiFormat 等历史字段）
+    const [rows] = await db.query(
+      'SELECT settings FROM user_settings WHERE user_id = ?',
+      [req.session.userId]
+    );
+    const current = rows[0]?.settings
+      ? (typeof rows[0].settings === 'string' ? JSON.parse(rows[0].settings) : rows[0].settings)
+      : {};
+    const next = {
+      ...current,
+      preferences: { ...(current.preferences || {}), ...incoming },
+    };
+
+    await db.query(
+      `INSERT INTO user_settings (user_id, settings)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE settings = ?, updated_at = NOW()`,
+      [req.session.userId, JSON.stringify(next), JSON.stringify(next)]
+    );
+
+    res.json({ success: true, preferences: next.preferences });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Update preferences error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1251,9 +1361,20 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       const inputThumbUrls = inputImageIds.map(id => imageMap.get(id)?.thumb || '');
       const outputThumbUrls = outputImageIds.map(id => imageMap.get(id)?.thumb || '');
 
+      const parseJson = (v) => {
+        if (v === null || v === undefined) return null;
+        if (typeof v === 'string') {
+          try { return JSON.parse(v); } catch { return null; }
+        }
+        return v;
+      };
+
       return {
         ...task,
         params: typeof task.params === 'string' ? JSON.parse(task.params) : task.params,
+        actual_params: parseJson(task.actual_params),
+        revised_prompt_by_image: parseJson(task.revised_prompt_by_image),
+        raw_image_urls: parseJson(task.raw_image_urls),
         input_image_ids: inputImageIds,
         output_image_ids: outputImageIds,
         input_image_urls: inputImageUrls,
@@ -1481,8 +1602,9 @@ app.post('/api/generate', requireAuth, async (req, res) => {
   const taskId = req.body.taskId ? String(req.body.taskId) : null;
   console.log(`[${new Date().toISOString()}] 🎨 Generate request started - User: ${req.session.userId}, Task: ${taskId || 'none'}, Prompt: "${req.body.prompt?.substring(0, 50)}...", Input image IDs: ${req.body.inputImageIds?.length || 0}`);
 
+  const callContext = {};
   try {
-    const result = await callUpstreamImageApi(req.session.userId, req.body);
+    const result = await callUpstreamImageApi(req.session.userId, req.body, callContext);
 
     // 服务端直接落盘：避免再让客户端 POST 回 /api/images/save 走一次 base64 往返
     const saved = [];
@@ -1505,9 +1627,50 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     // 服务端直接接管 task 状态更新，避免依赖前端回调（前端断网时 task 仍能落 done）
     if (taskId) {
       try {
+        // A-4 / A-5：把 revised_prompt 按 image id 对齐（同一索引）
+        const revisedPromptByImage = {};
+        if (Array.isArray(result.revisedPrompts)) {
+          for (let i = 0; i < result.revisedPrompts.length && i < saved.length; i++) {
+            revisedPromptByImage[saved[i].id] = result.revisedPrompts[i];
+          }
+        }
+        // A-2：raw_response_payload 体积可能很大，做大小裁剪避免拖死 DB
+        let rawPayloadJson = null;
+        if (result.rawPayload) {
+          try {
+            const str = JSON.stringify(result.rawPayload);
+            // 16KB 上限，超过则截掉，保留头部用于排查
+            rawPayloadJson = str.length > 16 * 1024 ? str.slice(0, 16 * 1024) + '...[truncated]' : str;
+          } catch {
+            rawPayloadJson = null;
+          }
+        }
+        const apiSettings = callContext.apiSettings || {};
         await db.query(
-          'UPDATE tasks SET status = ?, output_image_ids = ?, finished_at = ? WHERE id = ? AND user_id = ?',
-          ['done', JSON.stringify(saved.map((s) => s.id)), Date.now(), taskId, req.session.userId]
+          `UPDATE tasks
+           SET status = ?, output_image_ids = ?, finished_at = ?,
+               actual_params = ?, revised_prompt_by_image = ?,
+               raw_response_payload = ?, raw_image_urls = ?,
+               api_profile_id = COALESCE(api_profile_id, ?),
+               api_profile_name = COALESCE(api_profile_name, ?),
+               api_provider = COALESCE(api_provider, ?),
+               api_model = COALESCE(api_model, ?)
+           WHERE id = ? AND user_id = ?`,
+          [
+            'done',
+            JSON.stringify(saved.map((s) => s.id)),
+            Date.now(),
+            result.actualParams ? JSON.stringify(result.actualParams) : null,
+            Object.keys(revisedPromptByImage).length > 0 ? JSON.stringify(revisedPromptByImage) : null,
+            rawPayloadJson,
+            result.rawImageUrls ? JSON.stringify(result.rawImageUrls) : null,
+            apiSettings.profileId || null,
+            apiSettings.profileName || null,
+            apiSettings.provider || null,
+            apiSettings.model || null,
+            taskId,
+            req.session.userId,
+          ]
         );
       } catch (e) {
         console.error(`[${new Date().toISOString()}] ⚠️  Update task to done failed (Task: ${taskId}): ${e.message}`);
@@ -1533,12 +1696,41 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     // statusCode 是我们自己抛的业务错误（如参考图缺失），直接透传；其余走友好化（含 abort/timeout/network）
     const message = error.statusCode ? rawMessage : friendlyUpstreamMessage(rawMessage);
 
-    // 同步把 task 写入 error 状态，前端断网时也有正确状态
+    // 同步把 task 写入 error 状态，前端断网时也有正确状态。同时落 raw_response_payload + profile 快照
     if (taskId) {
       try {
+        const apiSettings = callContext.apiSettings || {};
+        const rawPayloadStr = error.response?.data
+          ? (() => {
+              try {
+                const s = typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data);
+                return s.length > 16 * 1024 ? s.slice(0, 16 * 1024) + '...[truncated]' : s;
+              } catch {
+                return null;
+              }
+            })()
+          : null;
         await db.query(
-          'UPDATE tasks SET status = ?, error_message = ?, finished_at = ? WHERE id = ? AND user_id = ?',
-          ['error', message, Date.now(), taskId, req.session.userId]
+          `UPDATE tasks
+           SET status = ?, error_message = ?, finished_at = ?,
+               raw_response_payload = COALESCE(?, raw_response_payload),
+               api_profile_id = COALESCE(api_profile_id, ?),
+               api_profile_name = COALESCE(api_profile_name, ?),
+               api_provider = COALESCE(api_provider, ?),
+               api_model = COALESCE(api_model, ?)
+           WHERE id = ? AND user_id = ?`,
+          [
+            'error',
+            message,
+            Date.now(),
+            rawPayloadStr,
+            apiSettings.profileId || null,
+            apiSettings.profileName || null,
+            apiSettings.provider || null,
+            apiSettings.model || null,
+            taskId,
+            req.session.userId,
+          ]
         );
       } catch (e) {
         console.error(`[${new Date().toISOString()}] ⚠️  Update task to error failed (Task: ${taskId}): ${e.message}`);

@@ -45,6 +45,7 @@ export default function InputBar() {
   const setParams = useStore((s) => s.setParams)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const enterSubmit = useStore((s) => s.settings.enterSubmit)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -165,6 +166,12 @@ export default function InputBar() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault()
+      if (canSubmit) submitTask()
+      return
+    }
+    // 习惯：Enter 直接提交（Shift+Enter 留作换行，IME 输入中按 Enter 不触发）
+    if (enterSubmit && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       if (canSubmit) submitTask()
     }

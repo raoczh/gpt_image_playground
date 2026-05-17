@@ -354,7 +354,20 @@ export const useStore = create<AppState>()(
       name: 'gpt-image-playground-prefs',
       storage: createJSONStorage(() => localStorage),
       version: 1,
-      partialize: (s) => ({ prompt: s.prompt, params: s.params }),
+      // 只缓存非敏感数据；偏好的主数据源是后端 /api/preferences，localStorage 仅作启动前的离线 fallback
+      // 不持久化 baseUrl/apiKey/model/timeout/apiFormat（这些来自当前 Profile，启动后从后端拉）
+      partialize: (s) => ({
+        params: s.params,
+        prompt: s.settings.persistInputOnRestart ? s.prompt : '',
+        settings: {
+          ...DEFAULT_SETTINGS,
+          enterSubmit: s.settings.enterSubmit,
+          clearInputAfterSubmit: s.settings.clearInputAfterSubmit,
+          persistInputOnRestart: s.settings.persistInputOnRestart,
+          reuseTaskApiProfileTemporarily: s.settings.reuseTaskApiProfileTemporarily,
+          alwaysShowRetryButton: s.settings.alwaysShowRetryButton,
+        },
+      }),
     },
   ),
 )
@@ -371,6 +384,7 @@ export async function initStore() {
   await loadTasksFirstPage()
   loadProfiles().catch(console.error)
   loadCustomProviders().catch(console.error)
+  loadPreferences().catch(console.error)
 
   // 收集所有任务引用的图片 id
   const referencedIds = new Set<string>()
@@ -441,6 +455,63 @@ export async function loadCustomProviders() {
   }
 }
 
+// ===== A-6 用户偏好（后端持久化，跨设备同步）=====
+// 5 个习惯开关：本地 zustand persist 只作离线 fallback，主数据源是后端 user_settings.settings.preferences
+
+const PREFERENCE_KEYS = [
+  'enterSubmit',
+  'clearInputAfterSubmit',
+  'persistInputOnRestart',
+  'reuseTaskApiProfileTemporarily',
+  'alwaysShowRetryButton',
+] as const
+
+type PreferenceKey = (typeof PREFERENCE_KEYS)[number]
+
+/** 启动时从后端拉偏好，覆盖本地缓存。失败时保留本地缓存或 DEFAULT_SETTINGS */
+export async function loadPreferences() {
+  const { user } = useStore.getState()
+  if (!user) return
+  try {
+    const res = await backendApi.getPreferences()
+    const remote = res.preferences || {}
+    const patch: Partial<AppSettings> = {}
+    for (const key of PREFERENCE_KEYS) {
+      if (typeof remote[key] === 'boolean') patch[key] = remote[key] as boolean
+    }
+    if (Object.keys(patch).length > 0) {
+      useStore.setState((s) => ({ settings: { ...s.settings, ...patch } }))
+    }
+  } catch (error) {
+    console.error('Failed to load preferences:', error)
+  }
+}
+
+let preferenceSaveTimer: ReturnType<typeof setTimeout> | null = null
+const pendingPreferenceChanges: Partial<Record<PreferenceKey, boolean>> = {}
+
+function flushPreferences() {
+  preferenceSaveTimer = null
+  const payload = { ...pendingPreferenceChanges }
+  for (const k of Object.keys(pendingPreferenceChanges) as PreferenceKey[]) {
+    delete pendingPreferenceChanges[k]
+  }
+  if (Object.keys(payload).length === 0) return
+  backendApi.updatePreferences(payload).catch((error) => {
+    console.error('Failed to save preferences:', error)
+  })
+}
+
+/** 修改单个偏好：立即更新 store + debounce 500ms 同步到后端 */
+export function setPreference<K extends PreferenceKey>(key: K, value: boolean) {
+  useStore.setState((s) => ({ settings: { ...s.settings, [key]: value } }))
+  const { user } = useStore.getState()
+  if (!user) return // 未登录态不同步
+  pendingPreferenceChanges[key] = value
+  if (preferenceSaveTimer != null) clearTimeout(preferenceSaveTimer)
+  preferenceSaveTimer = setTimeout(flushPreferences, 500)
+}
+
 // 把后端 Task 转成前端 TaskRecord
 function toTaskRecord(t: backendApi.Task): TaskRecord {
   return {
@@ -458,6 +529,14 @@ function toTaskRecord(t: backendApi.Task): TaskRecord {
     createdAt: t.started_at,
     finishedAt: t.finished_at || null,
     elapsed: t.finished_at ? t.finished_at - t.started_at : null,
+    actualParams: (t.actual_params as Partial<TaskParams>) ?? null,
+    revisedPromptByImage: t.revised_prompt_by_image ?? null,
+    rawResponsePayload: t.raw_response_payload ?? null,
+    rawImageUrls: t.raw_image_urls ?? null,
+    apiProfileId: t.api_profile_id ?? null,
+    apiProfileName: t.api_profile_name ?? null,
+    apiProvider: t.api_provider ?? null,
+    apiModel: t.api_model ?? null,
   }
 }
 
@@ -518,7 +597,7 @@ export async function loadMoreTasks() {
 
 /** 提交新任务 */
 export async function submitTask() {
-  const { user, prompt, inputImages, params, tasks, setTasks, showToast, setPrompt, clearInputImages, maskDraft, clearMaskDraft } =
+  const { user, prompt, inputImages, params, tasks, setTasks, showToast, setPrompt, clearInputImages, maskDraft, clearMaskDraft, settings } =
     useStore.getState()
 
   if (!user) {
@@ -579,9 +658,11 @@ export async function submitTask() {
   const newTasks = [task, ...tasks]
   setTasks(newTasks)
 
-  // 清空输入框和图片
-  setPrompt('')
-  clearInputImages()
+  // 清空输入框和图片（受习惯开关控制）
+  if (settings.clearInputAfterSubmit) {
+    setPrompt('')
+    clearInputImages()
+  }
   clearMaskDraft()
 
   // 如果用户已登录，同步到后端
@@ -653,11 +734,49 @@ function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   setTasks(updated)
 }
 
-/** 复用配置 */
-export async function reuseConfig(task: TaskRecord) {
-  const { setPrompt, setParams, setInputImages, showToast } = useStore.getState()
+/**
+ * 重试：基于一条已存在任务的提示词 / 参数 / 输入图，重新提交一次。
+ * 提交后等同于普通新任务，新任务有自己的 id；旧任务保留不动（避免误删）。
+ */
+export async function retryTask(task: TaskRecord): Promise<void> {
+  const { setPrompt, setParams, setInputImages, showToast, settings } = useStore.getState()
   setPrompt(task.prompt)
   setParams(task.params)
+  // 临时切换到任务当时的 profile（B-4）
+  if (settings.reuseTaskApiProfileTemporarily && task.apiProfileId) {
+    const exists = useStore.getState().profiles.some((p) => p.id === task.apiProfileId)
+    if (exists) {
+      useStore.setState({ activeProfileId: task.apiProfileId })
+    } else {
+      showToast('原 Profile 已被删除，使用当前默认 Profile', 'info')
+    }
+  }
+  const imgs: InputImage[] = []
+  for (const imgId of task.inputImageIds) {
+    const dataUrl = await ensureImageCached(imgId)
+    if (dataUrl) imgs.push({ id: imgId, dataUrl })
+  }
+  setInputImages(imgs)
+  // 立即提交
+  await submitTask()
+}
+
+/** 复用配置 */
+export async function reuseConfig(task: TaskRecord) {
+  const { setPrompt, setParams, setInputImages, showToast, settings } = useStore.getState()
+  setPrompt(task.prompt)
+  setParams(task.params)
+
+  // B-4: 临时切到任务当时的 Profile（如果开关开启 + Profile 还存在）
+  if (settings.reuseTaskApiProfileTemporarily && task.apiProfileId) {
+    const exists = useStore.getState().profiles.some((p) => p.id === task.apiProfileId)
+    if (exists) {
+      useStore.setState({ activeProfileId: task.apiProfileId })
+      showToast(`已临时切换到原任务的 Profile：${task.apiProfileName || task.apiProfileId}`, 'info')
+    } else {
+      showToast('原任务的 Profile 已被删除，将使用当前 Profile', 'info')
+    }
+  }
 
   // 恢复输入图片
   const imgs: InputImage[] = []

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, getCachedImage, ensureImageCached } from '../store'
+import { useStore } from '../store'
 import { formatImageRatio } from '../lib/size'
+import { getParamBadges } from '../lib/paramDisplay'
 
 interface Props {
   task: TaskRecord
@@ -221,18 +222,26 @@ export default function TaskCard({
             </p>
           </div>
           <div className="mt-auto flex flex-col gap-1.5">
-            {/* 参数：横向滚动 */}
+            {/* 参数：横向滚动；API 实际值与请求不一致时高亮 */}
             <div className="flex overflow-x-auto hide-scrollbar gap-1.5 whitespace-nowrap mask-edge-r min-w-0 pr-2">
-              <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                {task.params.quality}
-              </span>
-                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                  {task.params.size}
+              {getParamBadges(task.params, task.actualParams).map((badge) => (
+                <span
+                  key={badge.key}
+                  className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
+                    badge.mismatched
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+                      : 'bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400'
+                  }`}
+                  title={
+                    badge.mismatched
+                      ? `请求：${badge.requested}\nAPI 实际：${badge.actual}`
+                      : undefined
+                  }
+                >
+                  {badge.mismatched ? `${badge.requested} → ${badge.actual}` : badge.requested}
                 </span>
-                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                  {task.params.output_format}
-                </span>
-              </div>
+              ))}
+            </div>
             {/* 操作按钮 */}
             <div
               className="flex gap-1 justify-end flex-shrink-0"

@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { initStore } from './store'
+import { initStore, loadProfiles } from './store'
 import { useStore } from './store'
 import { normalizeBaseUrl } from './lib/api'
 import { getCurrentUser } from './lib/backendApi'
+import * as backendApi from './lib/backendApi'
+import { decodeShareableProfile } from './lib/urlSettings'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -41,6 +43,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 function MainApp() {
   const setSettings = useStore((s) => s.setSettings)
+  const showToast = useStore((s) => s.showToast)
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
@@ -56,19 +59,51 @@ function MainApp() {
       nextSettings.apiKey = apiKeyParam.trim()
     }
 
+    // B-1 ?settings=base64-json：导入分享的 Profile 配置
+    const settingsParam = searchParams.get('settings')
+    let pendingShareProfile: ReturnType<typeof decodeShareableProfile> | null = null
+    if (settingsParam) {
+      pendingShareProfile = decodeShareableProfile(settingsParam)
+      if (!pendingShareProfile) {
+        showToast('?settings= 参数无效，已忽略', 'error')
+      }
+    }
+
     if (Object.keys(nextSettings).length > 0) {
       setSettings(nextSettings)
+    }
 
+    if (nextSettings.baseUrl !== undefined || nextSettings.apiKey !== undefined || settingsParam) {
       searchParams.delete('apiUrl')
       searchParams.delete('apiKey')
+      searchParams.delete('settings')
 
       const nextSearch = searchParams.toString()
       const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
       window.history.replaceState(null, '', nextUrl)
     }
 
-    initStore()
-  }, [setSettings])
+    initStore().then(async () => {
+      if (!pendingShareProfile) return
+      try {
+        await backendApi.createProfile({
+          name: pendingShareProfile.name?.slice(0, 100) || '导入',
+          provider: pendingShareProfile.provider || 'openai',
+          base_url: pendingShareProfile.base_url || '',
+          api_key: pendingShareProfile.api_key || '',
+          model: pendingShareProfile.model || '',
+          timeout: typeof pendingShareProfile.timeout === 'number' ? pendingShareProfile.timeout : 600,
+          api_format: pendingShareProfile.api_format === 'imagen' ? 'imagen' : 'responses',
+          extra: pendingShareProfile.extra,
+        })
+        await loadProfiles()
+        showToast('已从 URL 导入 Profile', 'success')
+      } catch (err) {
+        console.error('Failed to import shared profile:', err)
+        showToast('导入分享的 Profile 失败', 'error')
+      }
+    })
+  }, [setSettings, showToast])
 
   return (
     <>

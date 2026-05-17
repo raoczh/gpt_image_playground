@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
+import { useStore, reuseConfig, editOutputs, removeTask, retryTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { formatImageRatio } from '../lib/size'
 
@@ -10,6 +10,8 @@ export default function DetailModal() {
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
+  const alwaysShowRetryButton = useStore((s) => s.settings.alwaysShowRetryButton)
+  const [showRawPayload, setShowRawPayload] = useState(false)
 
   const [imageIndex, setImageIndex] = useState(0)
   const [imageRatios, setImageRatios] = useState<Record<string, string>>({})
@@ -136,6 +138,29 @@ export default function DetailModal() {
     }
   }
 
+  const handleCopyRawImageUrls = async () => {
+    const urls = task.rawImageUrls
+    if (!urls || urls.length === 0) {
+      showToast('没有原始图片 URL', 'info')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(urls.join('\n'))
+      showToast(`已复制 ${urls.length} 个图片 URL`, 'success')
+    } catch {
+      showToast('复制失败', 'error')
+    }
+  }
+
+  const handleRetry = async () => {
+    try {
+      await retryTask(task)
+      setDetailTaskId(null)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '重试失败', 'error')
+    }
+  }
+
   const handleCopyPrompt = async () => {
     if (!task.prompt) return
     try {
@@ -143,6 +168,23 @@ export default function DetailModal() {
       showToast('提示词已复制', 'success')
     } catch {
       showToast('复制提示词失败', 'error')
+    }
+  }
+
+  const currentRevisedPrompt = currentOutputImageId
+    ? task.revisedPromptByImage?.[currentOutputImageId] || null
+    : null
+  const showRevisedPrompt = Boolean(
+    currentRevisedPrompt && task.prompt && currentRevisedPrompt.trim() !== task.prompt.trim(),
+  )
+
+  const handleCopyRevisedPrompt = async () => {
+    if (!currentRevisedPrompt) return
+    try {
+      await navigator.clipboard.writeText(currentRevisedPrompt)
+      showToast('改写后的提示词已复制', 'success')
+    } catch {
+      showToast('复制失败', 'error')
     }
   }
 
@@ -280,18 +322,48 @@ export default function DetailModal() {
               >
                 {task.error || '生成失败'}
               </p>
-              <button
-                type="button"
-                onClick={handleCopyError}
-                className="mt-3 inline-flex items-center justify-center rounded-full border border-red-200/80 bg-white/80 px-3 py-1.5 text-red-500 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-white/[0.04] dark:hover:bg-red-500/10"
-                aria-label="复制完整报错"
-                title="复制完整报错"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                </svg>
-              </button>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyError}
+                  className="inline-flex items-center justify-center rounded-full border border-red-200/80 bg-white/80 p-2 text-red-500 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-white/[0.04] dark:hover:bg-red-500/10"
+                  aria-label="复制完整报错"
+                  title="复制完整报错"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                  </svg>
+                </button>
+                {task.rawResponsePayload && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRawPayload(true)}
+                    className="inline-flex items-center justify-center rounded-full border border-red-200/80 bg-white/80 p-2 text-red-500 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-white/[0.04] dark:hover:bg-red-500/10"
+                    aria-label="查看原始响应"
+                    title="查看原始响应"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                      <polyline points="4 17 10 11 4 5" />
+                      <line x1="12" y1="19" x2="20" y2="19" />
+                    </svg>
+                  </button>
+                )}
+                {task.rawImageUrls && task.rawImageUrls.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCopyRawImageUrls}
+                    className="inline-flex items-center justify-center rounded-full border border-red-200/80 bg-white/80 p-2 text-red-500 transition hover:bg-red-50 dark:border-red-400/20 dark:bg-white/[0.04] dark:hover:bg-red-500/10"
+                    aria-label="复制图片 URL"
+                    title="复制图片 URL"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -328,6 +400,29 @@ export default function DetailModal() {
             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-4">
               {task.prompt || '(无提示词)'}
             </p>
+
+            {/* A-5 API 改写后的提示词 */}
+            {showRevisedPrompt && currentRevisedPrompt && (
+              <div className="mb-4 rounded-xl border border-amber-200/60 bg-amber-50/50 dark:border-amber-500/20 dark:bg-amber-500/10 p-3">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                    API 改写后的提示词
+                  </span>
+                  <button
+                    onClick={handleCopyRevisedPrompt}
+                    className="p-1 rounded text-amber-600 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition"
+                    title="复制改写后的提示词"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed whitespace-pre-wrap">
+                  {currentRevisedPrompt}
+                </p>
+              </div>
+            )}
 
             {/* 参考图 */}
             {task.inputImageIds?.length > 0 && (
@@ -415,6 +510,18 @@ export default function DetailModal() {
 
           {/* 操作按钮 */}
           <div className="flex gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
+            {(task.status === 'error' || alwaysShowRetryButton) && (
+              <button
+                onClick={handleRetry}
+                className="flex-1 flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition text-xs sm:text-sm font-medium whitespace-nowrap"
+                title="使用相同参数重新生成（新任务）"
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M4 20a8 8 0 0114-5M20 4a8 8 0 00-14 5" />
+                </svg>
+                重试
+              </button>
+            )}
             <button
               onClick={handleReuse}
               className="flex-1 flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition text-xs sm:text-sm font-medium whitespace-nowrap"
@@ -446,6 +553,55 @@ export default function DetailModal() {
           </div>
         </div>
       </div>
+      {showRawPayload && task.rawResponsePayload && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          onClick={() => setShowRawPayload(false)}
+        >
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div
+            className="relative z-10 w-full max-w-2xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl p-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">上游原始响应</h4>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(task.rawResponsePayload || '')
+                      showToast('已复制', 'success')
+                    } catch {
+                      showToast('复制失败', 'error')
+                    }
+                  }}
+                  className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+                >
+                  复制
+                </button>
+                <button
+                  onClick={() => setShowRawPayload(false)}
+                  className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+                  aria-label="关闭"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <pre className="flex-1 overflow-auto text-xs bg-gray-50 dark:bg-black/30 p-3 rounded-lg whitespace-pre-wrap break-all text-gray-700 dark:text-gray-300">
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(task.rawResponsePayload), null, 2)
+                } catch {
+                  return task.rawResponsePayload
+                }
+              })()}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

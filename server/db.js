@@ -165,6 +165,25 @@ async function initDatabase() {
       console.log('  ✅ Added is_favorite column');
     }
 
+    // 检查并添加 tasks 表的参数追踪 / 错误增强字段（A-2 / A-4 / A-5）
+    const [paramTrackingColumns] = await connection.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'actual_params'
+    `, [process.env.DB_NAME || 'gpt-image']);
+
+    if (paramTrackingColumns.length === 0) {
+      console.log('  📝 Adding param tracking columns to tasks table...');
+      await connection.query(`
+        ALTER TABLE tasks
+        ADD COLUMN actual_params JSON NULL COMMENT 'API 实际响应参数（A-4）' AFTER params,
+        ADD COLUMN revised_prompt_by_image JSON NULL COMMENT 'API 改写后的提示词，按 image id（A-5）' AFTER actual_params,
+        ADD COLUMN raw_response_payload LONGTEXT NULL COMMENT '上游原始响应（A-2）' AFTER error_message,
+        ADD COLUMN raw_image_urls JSON NULL COMMENT '上游返回的原始图片 URL 列表（A-2）' AFTER raw_response_payload
+      `);
+      console.log('  ✅ Added param tracking columns');
+    }
+
     // 检查并添加 tasks 表的 api_profile_* 快照字段（U2-2 API Profiles）
     const [profileSnapshotColumns] = await connection.query(`
       SELECT COLUMN_NAME

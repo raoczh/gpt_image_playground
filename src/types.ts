@@ -33,6 +33,16 @@ export interface AppSettings {
   model: string
   timeout: number
   apiFormat: ApiFormat
+  /** 习惯：Enter 提交 vs 仅 Ctrl/⌘+Enter 提交 */
+  enterSubmit: boolean
+  /** 习惯：提交后清空输入框（默认开） */
+  clearInputAfterSubmit: boolean
+  /** 习惯：重启后恢复上次输入 */
+  persistInputOnRestart: boolean
+  /** 习惯：复用历史任务时临时切到该任务当时的 Profile */
+  reuseTaskApiProfileTemporarily: boolean
+  /** 习惯：在完成态下也显示"重试"按钮 */
+  alwaysShowRetryButton: boolean
 }
 
 const DEFAULT_BASE_URL = ''
@@ -45,6 +55,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: 'gpt-5.3-codex',
   timeout: 600,
   apiFormat: 'responses',
+  enterSubmit: false,
+  clearInputAfterSubmit: true,
+  persistInputOnRestart: false,
+  reuseTaskApiProfileTemporarily: true,
+  alwaysShowRetryButton: false,
 }
 
 // ===== 任务参数 =====
@@ -108,6 +123,19 @@ export interface TaskRecord {
   finishedAt: number | null
   /** 总耗时毫秒 */
   elapsed: number | null
+  /** API 实际响应参数（A-4），与 params 不一致时显示对比徽章 */
+  actualParams?: Partial<TaskParams> | null
+  /** 按 image id 映射的 revised_prompt（A-5） */
+  revisedPromptByImage?: Record<string, string> | null
+  /** 上游原始响应（A-2），错误态可查看 */
+  rawResponsePayload?: string | null
+  /** 上游返回的图片外链（A-2），用于复制原图 URL */
+  rawImageUrls?: string[] | null
+  /** 任务提交时使用的 API Profile ID 快照（B-4） */
+  apiProfileId?: string | null
+  apiProfileName?: string | null
+  apiProvider?: string | null
+  apiModel?: string | null
 }
 
 // ===== IndexedDB 存储的图片 =====

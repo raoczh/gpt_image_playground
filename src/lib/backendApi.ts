@@ -85,6 +85,27 @@ export async function updateSettings(settings: {
   });
 }
 
+// ==================== 用户偏好（A-6） ====================
+
+export interface UserPreferences {
+  enterSubmit?: boolean;
+  clearInputAfterSubmit?: boolean;
+  persistInputOnRestart?: boolean;
+  reuseTaskApiProfileTemporarily?: boolean;
+  alwaysShowRetryButton?: boolean;
+}
+
+export async function getPreferences(): Promise<{ preferences: UserPreferences }> {
+  return apiRequest('/api/preferences');
+}
+
+export async function updatePreferences(preferences: UserPreferences): Promise<{ preferences: UserPreferences }> {
+  return apiRequest('/api/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ preferences }),
+  });
+}
+
 // ==================== 任务 API ====================
 
 export interface Task {
@@ -95,6 +116,14 @@ export interface Task {
   is_favorite?: number | boolean;
   error_message?: string;
   params: Record<string, any>;
+  actual_params?: Record<string, any> | null;
+  revised_prompt_by_image?: Record<string, string> | null;
+  raw_response_payload?: string | null;
+  raw_image_urls?: string[] | null;
+  api_profile_id?: string | null;
+  api_profile_name?: string | null;
+  api_provider?: string | null;
+  api_model?: string | null;
   input_image_ids: string[];
   output_image_ids: string[];
   input_image_urls: string[];

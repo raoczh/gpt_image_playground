@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { normalizeBaseUrl } from '../lib/api'
-import { useStore, exportData, importData, clearAllData, loadProfiles } from '../store'
+import { useStore, exportData, importData, clearAllData, loadProfiles, setPreference } from '../store'
 import { DEFAULT_SETTINGS, type AppSettings, type ApiFormat } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import * as backendApi from '../lib/backendApi'
+import { buildShareUrl, parseImportInput } from '../lib/urlSettings'
 
 const PROVIDER_OPTIONS: { value: string; label: string }[] = [
   { value: 'openai', label: 'OpenAI 兼容' },
@@ -164,6 +165,73 @@ export default function SettingsModal() {
     }
   }
 
+  const handleShareProfile = async () => {
+    if (!user || !activeProfileId) {
+      showToast('请先选择 Profile', 'error')
+      return
+    }
+    const profile = profiles.find((p) => p.id === activeProfileId)
+    if (!profile) return
+    // 注意：share 链接不包含 api_key（掩码状态）；用户可以手动加 key 后再分享
+    const url = buildShareUrl({
+      name: draftProfileName || profile.name,
+      provider: draftProvider,
+      base_url: draft.baseUrl,
+      model: draft.model,
+      timeout: draft.timeout,
+      api_format: draft.apiFormat,
+    })
+    try {
+      await navigator.clipboard.writeText(url)
+      showToast('分享链接已复制（不含 API Key）', 'success')
+    } catch {
+      // 退化为弹出可见
+      window.prompt('复制此链接以分享 Profile 配置（不含 API Key）', url)
+    }
+  }
+
+  const handleImportProfile = async () => {
+    if (!user) {
+      showToast('请先登录', 'error')
+      return
+    }
+    const input = window.prompt('粘贴分享链接、settings 编码或 JSON：')
+    if (!input) return
+    let payload = parseImportInput(input)
+    if (!payload) {
+      // 也许用户粘了完整 URL
+      try {
+        const u = new URL(input)
+        const s = u.searchParams.get('settings')
+        if (s) payload = parseImportInput(s)
+      } catch {
+        // ignore
+      }
+    }
+    if (!payload) {
+      showToast('未能解析输入内容', 'error')
+      return
+    }
+    try {
+      const res = await backendApi.createProfile({
+        name: payload.name?.slice(0, 100) || 'Imported',
+        provider: payload.provider || 'openai',
+        base_url: payload.base_url || '',
+        api_key: payload.api_key || '',
+        model: payload.model || '',
+        timeout: typeof payload.timeout === 'number' ? payload.timeout : 600,
+        api_format: payload.api_format === 'imagen' ? 'imagen' : 'responses',
+        extra: payload.extra,
+      })
+      await loadProfiles()
+      switchToProfile(res.id)
+      showToast('已导入 Profile', 'success')
+    } catch (error) {
+      console.error('Failed to import profile:', error)
+      showToast('导入失败', 'error')
+    }
+  }
+
   const handleClose = async () => {
     const nextTimeout = Number(timeoutInput)
     const finalSettings = {
@@ -269,6 +337,24 @@ export default function SettingsModal() {
                     <button type="button" onClick={createNewProfile} className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition">+ 新建</button>
                     <button type="button" onClick={setAsDefault} className="px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition">设默认</button>
                     <button type="button" onClick={deleteCurrentProfile} className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:text-red-400 transition">删除</button>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={handleShareProfile}
+                      className="flex-1 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-300 transition"
+                      title="复制当前 Profile 为分享链接（不含 API Key）"
+                    >
+                      分享链接
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImportProfile}
+                      className="flex-1 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-300 transition"
+                      title="粘贴分享链接 / JSON 导入 Profile"
+                    >
+                      导入 Profile
+                    </button>
                   </div>
                   <label className="block">
                     <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Provider</span>
@@ -401,6 +487,47 @@ export default function SettingsModal() {
           <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
             <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
               <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              习惯配置
+            </h4>
+            <div className="space-y-2.5">
+              <ToggleRow
+                label="Enter 直接提交"
+                desc="关闭时仅 Ctrl/⌘+Enter 提交，Enter 用于换行"
+                checked={settings.enterSubmit}
+                onChange={(v) => setPreference('enterSubmit', v)}
+              />
+              <ToggleRow
+                label="提交后清空输入框"
+                desc="关闭时提示词与参考图在提交后保留，方便微调再发"
+                checked={settings.clearInputAfterSubmit}
+                onChange={(v) => setPreference('clearInputAfterSubmit', v)}
+              />
+              <ToggleRow
+                label="重启后恢复上次输入"
+                desc="开启时刷新或重新打开页面后保留最后一次的提示词"
+                checked={settings.persistInputOnRestart}
+                onChange={(v) => setPreference('persistInputOnRestart', v)}
+              />
+              <ToggleRow
+                label="复用任务时临时切换 Profile"
+                desc="复用 / 重试历史任务时按其当时使用的 Profile 配置发起"
+                checked={settings.reuseTaskApiProfileTemporarily}
+                onChange={(v) => setPreference('reuseTaskApiProfileTemporarily', v)}
+              />
+              <ToggleRow
+                label="完成态显示重试按钮"
+                desc="详情页对已成功的任务也显示重试按钮"
+                checked={settings.alwaysShowRetryButton}
+                onChange={(v) => setPreference('alwaysShowRetryButton', v)}
+              />
+            </div>
+          </section>
+
+          <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
+            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
               </svg>
               数据管理
@@ -450,5 +577,41 @@ export default function SettingsModal() {
         </div>
       </div>
     </div>
+  )
+}
+
+function ToggleRow({
+  label,
+  desc,
+  checked,
+  onChange,
+}: {
+  label: string
+  desc: string
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="flex items-start gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-white/[0.03] transition cursor-pointer">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`mt-0.5 relative shrink-0 w-9 h-5 rounded-full transition-colors ${
+          checked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.1]'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+            checked ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-gray-700 dark:text-gray-200">{label}</div>
+        <div className="text-[11px] text-gray-400 dark:text-gray-500 leading-snug mt-0.5">{desc}</div>
+      </div>
+    </label>
   )
 }
