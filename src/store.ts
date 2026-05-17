@@ -6,6 +6,7 @@ import type {
   InputImage,
   TaskRecord,
   ExportData,
+  MaskDraft,
 } from './types'
 import { DEFAULT_SETTINGS, DEFAULT_PARAMS } from './types'
 import {
@@ -17,6 +18,7 @@ import {
   deleteImage,
   clearImages,
   hashDataUrl,
+  storeImage,
 } from './lib/db'
 import { callImageApi } from './lib/api'
 import { normalizeImageSize } from './lib/size'
@@ -130,6 +132,12 @@ interface AppState {
   selectAllTasks: () => void
   clearTaskSelection: () => void
   batchDeleteSelected: () => Promise<void>
+  // 蒙版编辑器
+  maskEditorImageId: string | null
+  setMaskEditorImageId: (id: string | null) => void
+  maskDraft: MaskDraft | null
+  setMaskDraft: (draft: MaskDraft | null) => void
+  clearMaskDraft: () => void
 
   // UI
   detailTaskId: string | null
@@ -303,6 +311,11 @@ export const useStore = create<AppState>()(
 
     state.showToast(`已删除 ${ids.length} 条记录`, 'success')
   },
+  maskEditorImageId: null,
+  setMaskEditorImageId: (maskEditorImageId) => set({ maskEditorImageId }),
+  maskDraft: null,
+  setMaskDraft: (maskDraft) => set({ maskDraft }),
+  clearMaskDraft: () => set({ maskDraft: null }),
 
   // UI
   detailTaskId: null,
@@ -445,7 +458,7 @@ export async function loadMoreTasks() {
 
 /** 提交新任务 */
 export async function submitTask() {
-  const { user, prompt, inputImages, params, tasks, setTasks, showToast, setPrompt, clearInputImages } =
+  const { user, prompt, inputImages, params, tasks, setTasks, showToast, setPrompt, clearInputImages, maskDraft, clearMaskDraft } =
     useStore.getState()
 
   if (!user) {
@@ -466,17 +479,33 @@ export async function submitTask() {
     useStore.getState().setParams({ size: normalizedParams.size })
   }
 
+  // 蒙版逻辑：如果 maskDraft 指向的图在当前 inputImages 中，把它排到第一位，并把 mask data URL 透传到后端
+  let orderedInputImages = inputImages
+  let maskDataUrl: string | undefined
+  let maskTargetImageId: string | undefined
+  if (maskDraft) {
+    const target = inputImages.find((img) => img.id === maskDraft.targetImageId)
+    if (target) {
+      orderedInputImages = [target, ...inputImages.filter((img) => img.id !== target.id)]
+      maskDataUrl = maskDraft.maskDataUrl
+      maskTargetImageId = target.id
+    } else {
+      // 目标图已经不在 inputImages 中，清理掉这条 draft
+      clearMaskDraft()
+    }
+  }
+
   // 输入图片的 dataUrl 直接来自 store；InputImage 创建时已固化。
-  const inputImageIds = inputImages.map((i) => i.id)
+  const inputImageIds = orderedInputImages.map((i) => i.id)
 
   const taskId = genId()
   const task: TaskRecord = {
     id: taskId,
     prompt: prompt.trim(),
     params: normalizedParams,
-    inputImageIds: inputImages.map((i) => i.id),
-    inputImageUrls: inputImages.map((i) => i.dataUrl),
-    inputThumbnails: inputImages.map(() => ''),
+    inputImageIds,
+    inputImageUrls: orderedInputImages.map((i) => i.dataUrl),
+    inputThumbnails: orderedInputImages.map(() => ''),
     outputImages: [],
     outputThumbnails: [],
     status: 'running',
@@ -493,6 +522,7 @@ export async function submitTask() {
   // 清空输入框和图片
   setPrompt('')
   clearInputImages()
+  clearMaskDraft()
 
   // 如果用户已登录，同步到后端
   if (user) {
@@ -510,10 +540,10 @@ export async function submitTask() {
   }
 
   // 异步调用 API；服务端按 ID 读盘构造上游请求，避免重复传 base64
-  executeTask(taskId, inputImageIds)
+  executeTask(taskId, inputImageIds, maskDataUrl, maskTargetImageId)
 }
 
-async function executeTask(taskId: string, inputImageIds: string[]) {
+async function executeTask(taskId: string, inputImageIds: string[], maskDataUrl?: string, maskTargetImageId?: string) {
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
 
@@ -524,6 +554,8 @@ async function executeTask(taskId: string, inputImageIds: string[]) {
       inputImageIds,
       taskId,
       timeoutSec: useStore.getState().settings.timeout,
+      maskDataUrl,
+      maskTargetImageId,
     })
 
     // 服务端已落盘并直接 UPDATE tasks 状态，前端只更新本地 store

@@ -38,6 +38,8 @@ export default function InputBar() {
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
   const moveInputImage = useStore((s) => s.moveInputImage)
+  const maskDraft = useStore((s) => s.maskDraft)
+  const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const pendingImageCount = useStore((s) => s.pendingImageCount)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
@@ -368,7 +370,9 @@ export default function InputBar() {
                     ? 'border-l-2 border-blue-500'
                     : showDropAfter
                       ? 'border-r-2 border-blue-500'
-                      : 'border border-gray-200 dark:border-white/[0.08]'
+                      : maskDraft?.targetImageId === img.id
+                        ? 'border-2 border-blue-500'
+                        : 'border border-gray-200 dark:border-white/[0.08]'
                 }`}
                 onClick={() => setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))}
               >
@@ -378,6 +382,18 @@ export default function InputBar() {
                   alt=""
                 />
               </div>
+              <span
+                className="absolute -bottom-1 -right-1 w-[22px] h-[22px] rounded-full bg-blue-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-blue-600 z-30"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMaskEditorImageId(img.id)
+                }}
+                title={maskDraft?.targetImageId === img.id ? '编辑遮罩' : '添加遮罩'}
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </span>
               <span
                 className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 z-30"
                 onClick={(e) => {

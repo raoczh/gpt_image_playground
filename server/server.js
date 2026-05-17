@@ -280,7 +280,7 @@ async function callUpstreamImageApi(userId, payload) {
     throw new Error('未配置默认 API Key');
   }
 
-  const { prompt, params, inputImageIds } = payload;
+  const { prompt, params, inputImageIds, maskDataUrl, maskTargetImageId } = payload;
   const inputImageDataUrls = await loadInputImageDataUrls(userId, inputImageIds);
   const isEdit = inputImageDataUrls.length > 0;
   const mime = MIME_MAP[params.output_format] || 'image/png';
@@ -402,6 +402,18 @@ async function callUpstreamImageApi(userId, payload) {
       const ext = matches[1].split('/')[1] || 'png';
       formData.append('image[]', blob, `input-${i + 1}.${ext}`);
       console.log(`[${new Date().toISOString()}] 📎 Added image ${i + 1}: ${matches[1]}, size: ${blob.size} bytes`);
+    }
+
+    // 蒙版编辑：把 maskDataUrl append 到 FormData。要求 mask 与第一张参考图（target）对齐
+    if (maskDataUrl && typeof maskDataUrl === 'string') {
+      const maskMatches = maskDataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (maskMatches) {
+        const maskBlob = new Blob([Buffer.from(maskMatches[2], 'base64')], { type: maskMatches[1] });
+        formData.append('mask', maskBlob, 'mask.png');
+        console.log(`[${new Date().toISOString()}] 🎨 Added mask: ${maskMatches[1]}, size: ${maskBlob.size} bytes, targetId: ${maskTargetImageId || 'n/a'}`);
+      } else {
+        console.warn(`[${new Date().toISOString()}] ⚠️  Invalid maskDataUrl format, mask skipped`);
+      }
     }
 
     response = await fetch(endpoint, {

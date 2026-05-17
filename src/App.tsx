@@ -14,6 +14,7 @@ import SettingsModal from './components/SettingsModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import ImageContextMenu from './components/ImageContextMenu'
+import MaskEditorModal from './components/MaskEditorModal'
 import LoginPage from './pages/LoginPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -83,6 +84,7 @@ function MainApp() {
       <ConfirmDialog />
       <Toast />
       <ImageContextMenu />
+      <MaskEditorModal />
     </>
   )
 }

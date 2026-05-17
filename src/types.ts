@@ -51,6 +51,12 @@ export interface InputImage {
   dataUrl: string
 }
 
+export interface MaskDraft {
+  targetImageId: string
+  maskDataUrl: string
+  updatedAt: number
+}
+
 // ===== 任务记录 =====
 
 export type TaskStatus = 'running' | 'done' | 'error'

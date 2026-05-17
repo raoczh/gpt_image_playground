@@ -11,6 +11,10 @@ export interface CallApiOptions {
   taskId: string
   /** 上游超时（秒），客户端会自动多加 10s 容差再发起 abort */
   timeoutSec?: number
+  /** 蒙版编辑产生的 mask data URL；后端 edits 路径把它直接 append 到 FormData */
+  maskDataUrl?: string
+  /** 蒙版目标图 ID，用于校验 mask 与目标图属于同一张参考图 */
+  maskTargetImageId?: string
 }
 
 export interface GeneratedImage {
@@ -45,6 +49,8 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       params: opts.params,
       inputImageIds: opts.inputImageIds,
       taskId: opts.taskId,
+      maskDataUrl: opts.maskDataUrl,
+      maskTargetImageId: opts.maskTargetImageId,
     }),
     signal,
   })
