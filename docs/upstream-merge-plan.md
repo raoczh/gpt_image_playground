@@ -1,7 +1,7 @@
 # 上游功能补齐计划
 
-> 不直接合并上游，而是按本分支的 backend-first 架构重新实现上游 v0.2.8 → v0.3.5 的功能性更新。
-> 实现完成后再做一次正式上游合并——届时大部分功能已存在，解冲突时可直接 take ours。
+> **策略（2026-05-17 更新）**：不做整体 `git merge main`，改为按需从上游手动搬运具体功能到本分支。
+> 本文档保留早期计划、已完成清单和上游可参考代码位置，**未来要做的功能见 §十五（差异清单）+ §十六（实施建议）**。
 
 ---
 
@@ -14,24 +14,32 @@
 
 ## 二、策略
 
-**重新实现 > 直接合并**：
+**不合并上游，按需手动搬运具体功能**。
 
-1. 在 `local-gpt-image` 分支上按本分支架构实现上游的功能性更新
-2. 实现完成后再 `git merge main`：
-   - 已实现的功能（store/types/api 等核心文件）→ take ours
-   - 未实现的纯新增文件（如 [MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx)）→ take theirs
-   - 配置文件 / 部署文件 → 手工合
-3. 实现期间每个功能一个独立 commit，方便回滚和未来比对
+**早期方案（已废弃）**：曾计划"先按本分支架构重新实现上游主要功能，再 `git merge main` 解冲突"。实际尝试合并后发现：
+
+- staged 阶段引入 40+ 个上游纯新增文件，其中绝大多数（apiProfiles.ts / falAiImageApi.ts / paramDisplay.tsx / promptImageMentions.ts 等）跟本分支架构方向不符，需要合并后再手动 `git rm`，工作量大
+- 14 个 content 冲突文件即使绝大多数 take ours，仍然要逐文件审查，且会丢失上游一些 UI 细节改进
+- 合并 commit 会引入跟本分支无关的提交历史
+- 后续上游再有更新，又要重复这套流程
+
+**当前方案**：
+
+1. **不再执行 `git merge main`**——已经实现的上游功能保留，未来不依赖上游分支
+2. **按需手动搬运**：要做哪个上游功能，就用 `git show main:<file>` 看上游实现作为参考，按本分支架构重新实现，独立 commit
+3. **要做的功能清单见 §十五（差异详情）+ §十六（实施优先级和工作量估算）**
+4. **不再追踪 main 进度**：上游后续如有新版本，再由人决定是否纳入
 
 **优势**：
 
-- 不被上游 IndexedDB 那套限制，可以按后端架构最佳方式落地
+- 不再被上游 IndexedDB 那套架构限制，按后端最佳方式落地
 - 每个功能小步独立提交，可逐项验证、可回滚
-- 解决"功能等价但代码文本不同"的冲突最容易（直接 take ours）
+- 不引入跟本分支无关的代码和历史
+- 工作量可控（按 §十六 的批次推进，3-4 个工日可对齐 95% 上游功能）
 
 ## 三、上游可参考的代码位置
 
-后续实现时，从 `main` 分支查阅上游实现：
+按需手动实现某个功能时，从 `main` 分支查阅上游实现：
 
 | 功能 | 上游关键文件 | 上游关键 commit |
 |---|---|---|
@@ -79,7 +87,7 @@
 - **决策（2026-05-17）**：本部署面向 OpenAI 兼容服务（含官方/Azure/第三方代理/本地网关），fal.ai 是独立平台、需用户单独注册付费 key、跟 OpenAI 协议完全不同。留着只会增加 UI 复杂度和维护成本——已移除。
 - **上游**：`bc496dc`，[src/lib/falAiImageApi.ts](../src/lib/falAiImageApi.ts) 227 行
 - **本分支状态**：仅启用 OpenAI 兼容路径，前端 provider 选择只剩 OpenAI 一项；非 OpenAI provider 后端直接 400 报错
-- **合并时**：上游的 falImageApi.ts / falAiImageApi.ts 等纯新增文件会被 take theirs 拉进来，合并后手动删除（见第十节）
+- **未来如要查上游 fal 实现**：见 `git show main:src/lib/falAiImageApi.ts`
 - **状态**：⏳
 
 ### U1-3 通用组件库
@@ -221,35 +229,13 @@
 
 ---
 
-## 十、实现完成后的合并策略
+## 十、（已废弃）实现完成后的合并策略
 
-当 U1-U2 全部完成、U3-U4 按需完成后，执行正式合并：
-
-```bash
-git checkout local-gpt-image
-git merge main
-```
-
-预期冲突解决策略：
-
-| 文件 | 策略 |
-|---|---|
-| `src/store.ts` | take ours（后端架构差异本质，本分支已实现等价功能） |
-| `src/types.ts` | take ours |
-| `src/lib/api.ts` | take ours |
-| `src/components/SettingsModal.tsx` | take ours |
-| `src/components/Header.tsx` | take ours |
-| `src/components/InputBar.tsx` | take ours（U2-1 已重写） |
-| `src/components/TaskGrid.tsx` | take ours（U3-1 已实现） |
-| `src/components/TaskCard.tsx` | take ours |
-| `src/components/DetailModal.tsx` | take ours |
-| `src/components/Lightbox.tsx` | 手工合（细节修复需要逐一比对） |
-| `src/components/Toast.tsx` | take ours（已有队列化） |
-| `src/main.tsx` `src/App.tsx` | 手工合（入口和路由） |
-| `package.json` `package-lock.json` | 取并集，重新 `npm install` |
-| `.gitignore` | 取并集 |
-| `src/hooks/useVersionCheck.ts` (modify/delete) | take ours (deleted) |
-| 上游新增文件（未涉及冲突） | take theirs（自动并入） |
+> ⚠️ **此章节为早期方案遗留，决策已改为不合并**。本节保留作为历史记录和决策追溯依据。
+>
+> 当前策略见 §二、未来要做的功能见 §十五 / §十六。
+>
+> 早期曾尝试执行 `git merge main`，发现需要清理 40+ 个不适用的上游新增文件、解 14 处 content 冲突，且会引入跟本分支无关的提交历史，遂改为按需手动搬运。详见 §二"早期方案（已废弃）"。
 
 ---
 
@@ -257,17 +243,17 @@ git merge main
 
 > **如果你（Claude 或我自己）在新对话里继续这件事，从这里开始**
 
-1. **读这份文档** ([docs/upstream-merge-plan.md](upstream-merge-plan.md))，了解策略与阶段
-2. **查看当前进度**：`git log local-gpt-image --oneline | head -30`，看 `feat(upstream):` 前缀的 commit
-3. **当前已实现的功能**：搜索本文档中状态为 ✅ 的项
-4. **选择下一项**：从未完成的最高优先级阶段（U1 → U2 → U3 → U4）里取
-5. **实现规范**：
-   - 每个功能一个独立 commit
-   - commit message 用 `feat(upstream): <功能名>` 或 `fix(upstream): <修复>` 前缀，便于过滤
-   - 实现前先用 `git show main:<file>` 查上游实现作为参考
-   - 实现后更新本文档对应项的状态为 ✅，附上落地位置和决策记录（沿用 [docs/optimization-plan.md](optimization-plan.md) 的风格）
+1. **读这份文档**，重点看 §二 当前策略、§十二 已完成清单、§十五 详细差异、§十六 实施建议
+2. **当前策略**：**不再 `git merge main`**，按需手动搬运具体功能（详见 §二）
+3. **查看进度**：`git log local-gpt-image --oneline | head -30`，看 `feat(upstream):` 前缀的 commit
+4. **要做某个上游功能**：
+   - 从 §十六 的优先级清单里选一项（A-x / B-x / C-x 编号）
+   - 用 `git show main:<file>` 看上游实现作为参考
+   - 按本分支架构（backend-first）改造后实现，独立 commit
+   - commit message 用 `feat(upstream): A-x <功能名>` 或 `fix(upstream): A-x <修复>` 前缀
+   - 完成后在 §十六 对应项加 ✅ 标记完成时间和 commit hash
    - 跑 `npx tsc --noEmit` 确保类型通过
-6. **决策点**：本文档中标有"决策"的位置在动手前先确认（U1-1 mask 不持久化、U2-2 是否多 profile、U3-3 是否要做）
+5. **不要建议或执行 `git merge main`**——这是已经评估过并废弃的方案，理由见 §二
 
 ---
 
@@ -306,90 +292,14 @@ git merge main
 - **U3-3 参数变更链（可选）** — DB 加 `parent_task_id`，前端 DetailModal 加变更链面板。功能价值需用户确认后再启动。预估 2 天。
 
 **下一步建议：**
-1. 先做正式的 `git merge main`，按"实现完成后的合并策略"表逐文件解决冲突。已实现的功能直接 take ours，纯新增文件 take theirs。预计还会有 InputBar / store / SettingsModal 等核心文件的冲突需要手工合并取舍。
-2. U2-1 / U3-3 等合并完成后再单独处理。
+- 不再做 `git merge main`，按需手动搬运具体上游功能（详见 §二、§十六）
+- **U2-1 / U3-3**：本节列的两项历史"未完成"，已重新归入 §十五 的差异清单（U2-1 = A-3，U3-3 = 未纳入）
+- 后续工作直接看 §十六 第一/二/三批的优先级排期
 
 **注意事项（已知简化）：**
 - **fal.ai 已撤回**：本部署仅启用 OpenAI 兼容路径，前端 SettingsModal provider 选项只剩 OpenAI 一项；后端 `callUpstreamImageApi` 对非 OpenAI provider 直接 400 报错
 - 自定义 HTTP provider 的 schema、CRUD API、前端选择 UI 已就位，但后端实际请求构造逻辑未实现，选择后会被 400 拦截。如果未来要启用，需要补 `callCustomHttpProvider` 函数和模板化的 body / files / result path 解析
 - API Profile 增加了 `user_api_profiles` 和 `user_custom_providers` 两张表，旧 `user_settings` 表保留作为兼容回退。第一次访问 `/api/profiles` 时自动迁移一条默认 profile
-
-### 合并清单（执行 `git merge main` 时的指引）
-
-按文件分类的取舍。
-
-合并前/中的具体取舍——按文件分类。
-
-### A. 直接 take ours（已实现等价功能或本分支主动选择）
-
-- [src/store.ts](../src/store.ts) — backend-first 状态层
-- [src/types.ts](../src/types.ts) — `BuiltInApiProvider = 'openai'`，撤回了 fal
-- [src/lib/api.ts](../src/lib/api.ts) — 极简 fetch 转发到后端
-- [src/lib/db.ts](../src/lib/db.ts) — 已退化为缓存 helper，主数据走后端
-- [src/lib/devProxy.ts](../src/lib/devProxy.ts) — 本分支自定义版本
-- [src/main.tsx](../src/main.tsx) — 主动 `unregister()` Service Worker，不启用 PWA
-- [src/components/Header.tsx](../src/components/Header.tsx) — 含 GitHub 登录入口
-- [src/components/SettingsModal.tsx](../src/components/SettingsModal.tsx) — Profile UI 已重构，且只支持 OpenAI provider
-- [src/components/InputBar.tsx](../src/components/InputBar.tsx) — 已用 Pointer Events 实现拖拽（U2-1 @mention 未做，若以后做再单独迭代）
-- [src/components/TaskGrid.tsx](../src/components/TaskGrid.tsx) — 含批量选择 + 收藏过滤
-- [src/components/TaskCard.tsx](../src/components/TaskCard.tsx) — 含收藏 + `data-original-src` + 多选 checkbox
-- [src/components/DetailModal.tsx](../src/components/DetailModal.tsx) — 双阶段加载 + `data-original-src`
-- [src/components/Lightbox.tsx](../src/components/Lightbox.tsx) — 一直用原图，本分支 src 同步赋值无 race
-- [src/components/Toast.tsx](../src/components/Toast.tsx) — 已队列化
-- [src/components/ImageContextMenu.tsx](../src/components/ImageContextMenu.tsx) — 优先取 `dataset.originalSrc`
-- [src/hooks/useVersionCheck.ts](../src/hooks/useVersionCheck.ts) — 本分支已删除（version 由后端管理）
-
-### B. take theirs（纯新增、本分支没有）
-
-- [src/components/MaskEditorModal.tsx](../src/components/MaskEditorModal.tsx) — 已 cherry-pick，文件名相同会自动合
-- [src/components/Checkbox.tsx](../src/components/Checkbox.tsx) [HelpModal.tsx](../src/components/HelpModal.tsx) [SupportPromptModal.tsx](../src/components/SupportPromptModal.tsx) [ViewportTooltip.tsx](../src/components/ViewportTooltip.tsx) [icons.tsx](../src/components/icons.tsx) — 已 cherry-pick
-- 上游测试文件 `*.test.ts` — 本分支没有测试基础设施，take theirs 不会冲突但可能需要 vitest 配置才能跑
-
-### C. 合并后**手动删除**（take theirs 进来但本分支用不上）
-
-| 文件 | 原因 |
-|---|---|
-| `src/lib/apiProfiles.ts` | 本分支 Profile 管理在 server.js + store.ts 里，前端不需要 |
-| `src/lib/apiShared.ts` | 上游 API 抽象层，本分支只走 backendApi |
-| `src/lib/openaiCompatibleImageApi.ts` `src/lib/oaiImageApi.ts` | 同上 |
-| `src/lib/falAiImageApi.ts` `src/lib/falImageApi.ts` | fal.ai 已撤回 |
-| `src/lib/promptImageMentions.ts` + `*.test.ts` | U2-1 未做，文件进来没人用 |
-| `src/lib/urlSettings.ts` + `*.test.ts` | 上游 URL 查询参数处理，本分支配置在后端 |
-| `src/lib/paramCompatibility.ts` `src/lib/paramDisplay.tsx` | 跟 a2edf71 / 10ad814 的 TaskCard 参数显示绑定，本分支没采用 |
-| `src/hooks/useDockerApiUrlMigrationNotice.ts` `src/hooks/useDockerBreakingChangeNotice.ts` | 上游 Docker env 重构通知，本分支不适用 |
-| `scripts/mock-image-api.mjs` `docs/mock-image-api.md` | 上游本地 mock 工具，本分支测试用真实后端 |
-| `wrangler.jsonc` | Cloudflare Worker 部署，本分支走宝塔/Docker |
-| `.github/workflows/vercel-tag-deploy.yml` | Vercel 部署，本分支走宝塔/Docker |
-| `deploy/migrate-api-env.envsh` `src/hooks/useDocker*Notice.ts` | 上游 docker env 迁移辅助 |
-
-### D. 手工合并（双方都有但需要逐块取舍）
-
-| 文件 | 怎么合 |
-|---|---|
-| `package.json` `package-lock.json` | 取依赖并集，注意 `sharp`（本分支后端用）保留；上游可能新增的 `@fal-ai/client` 等可删；`npm install` 重新生成 lock |
-| `.gitignore` | 取并集即可 |
-| `README.md` | 本分支 [README_BAOTA.md](../README_BAOTA.md) / [README_DEPLOY.md](../README_DEPLOY.md) 已经覆盖部署说明；上游 README 改进可挑性能/功能描述部分合进来 |
-
-### E. 检查 modify/delete 冲突
-
-- `src/hooks/useVersionCheck.ts` —— 本分支删了，main 改了。冲突时选 `git rm` 保持删除
-
-### 合并执行步骤
-
-```bash
-git checkout local-gpt-image
-git fetch origin main
-git merge --no-commit main         # 不要立即提交，先解冲突
-# 按上面 A/B/C/D 表分别处理冲突
-git status                          # 看剩余 unmerged
-# 对 A 类：git checkout --ours <file>
-# 对 E 类：git rm src/hooks/useVersionCheck.ts
-npm install                         # 重新生成 lock
-npx tsc --noEmit                    # 类型校验
-# 启动开发服 + 后端，跑通主流程后再 commit
-git commit
-# 合并完成后再处理 C 类：git rm 那些用不上的文件
-```
 
 ---
 
