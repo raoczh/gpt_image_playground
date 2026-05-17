@@ -94,6 +94,7 @@ interface AppState {
   removeInputImage: (idx: number) => void
   clearInputImages: () => void
   setInputImages: (imgs: InputImage[]) => void
+  moveInputImage: (fromIdx: number, toIdx: number) => void
   /** 正在处理（上传/转码）中的图片数量，用于阻止 race 提交 */
   pendingImageCount: number
   incrementPendingImage: () => void
@@ -176,6 +177,16 @@ export const useStore = create<AppState>()(
       return { inputImages: [] }
     }),
   setInputImages: (imgs) => set({ inputImages: imgs }),
+  moveInputImage: (fromIdx, toIdx) =>
+    set((s) => {
+      if (fromIdx === toIdx) return s
+      if (fromIdx < 0 || fromIdx >= s.inputImages.length) return s
+      const images = [...s.inputImages]
+      const [moved] = images.splice(fromIdx, 1)
+      const target = Math.max(0, Math.min(toIdx > fromIdx ? toIdx - 1 : toIdx, images.length))
+      images.splice(target, 0, moved)
+      return { inputImages: images }
+    }),
   pendingImageCount: 0,
   incrementPendingImage: () =>
     set((s) => ({ pendingImageCount: s.pendingImageCount + 1 })),

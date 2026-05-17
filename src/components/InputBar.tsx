@@ -37,6 +37,7 @@ export default function InputBar() {
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
+  const moveInputImage = useStore((s) => s.moveInputImage)
   const pendingImageCount = useStore((s) => s.pendingImageCount)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
@@ -54,6 +55,8 @@ export default function InputBar() {
   const [attachHover, setAttachHover] = useState(false)
   const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
+  const [thumbDragIndex, setThumbDragIndex] = useState<number | null>(null)
+  const [thumbDragOverIndex, setThumbDragOverIndex] = useState<number | null>(null)
   const handleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })
   const [outputCompressionInput, setOutputCompressionInput] = useState(
@@ -312,26 +315,83 @@ export default function InputBar() {
   const renderImageThumbs = () => (
     <div ref={imagesRef}>
       <div className="grid grid-cols-[repeat(auto-fill,52px)] justify-between gap-x-2 gap-y-3 mb-3">
-        {inputImages.map((img, idx) => (
-          <div key={img.id} className="relative group inline-block">
-            <div className="relative w-[52px] h-[52px] rounded-xl overflow-hidden border border-gray-200 dark:border-white/[0.08] shadow-sm cursor-pointer">
-              <img
-                src={img.dataUrl}
-                className="w-full h-full object-cover hover:opacity-90 transition-opacity"
-                onClick={() => setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))}
-                alt=""
-              />
-            </div>
-            <span
-              className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
-              onClick={() => removeInputImage(idx)}
+        {inputImages.map((img, idx) => {
+          const isDraggingThumb = thumbDragIndex === idx
+          const isLast = idx === inputImages.length - 1
+          const showDropBefore = thumbDragOverIndex === idx && thumbDragIndex !== idx
+          const showDropAfter = thumbDragOverIndex === inputImages.length && isLast && thumbDragIndex !== idx
+
+          const handleDragStart = (e: React.DragEvent) => {
+            setThumbDragIndex(idx)
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData('text/plain', String(idx))
+          }
+          const handleDragOver = (e: React.DragEvent) => {
+            if (thumbDragIndex === null) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            if (thumbDragIndex === idx) return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const midX = rect.left + rect.width / 2
+            setThumbDragOverIndex(e.clientX < midX ? idx : idx + 1)
+          }
+          const handleDrop = (e: React.DragEvent) => {
+            if (thumbDragIndex === null) return
+            e.preventDefault()
+            e.stopPropagation()
+            if (thumbDragIndex !== idx) {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const midX = rect.left + rect.width / 2
+              moveInputImage(thumbDragIndex, e.clientX < midX ? idx : idx + 1)
+            }
+            setThumbDragIndex(null)
+            setThumbDragOverIndex(null)
+          }
+          const handleDragEnd = () => {
+            setThumbDragIndex(null)
+            setThumbDragOverIndex(null)
+          }
+
+          return (
+            <div
+              key={img.id}
+              className={`relative group inline-block shrink-0 transition-opacity ${isDraggingThumb ? 'opacity-40' : ''}`}
+              draggable
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
             >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </span>
-          </div>
-        ))}
+              <div
+                className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing ${
+                  showDropBefore
+                    ? 'border-l-2 border-blue-500'
+                    : showDropAfter
+                      ? 'border-r-2 border-blue-500'
+                      : 'border border-gray-200 dark:border-white/[0.08]'
+                }`}
+                onClick={() => setLightboxImageId(img.dataUrl, inputImages.map((i) => i.dataUrl))}
+              >
+                <img
+                  src={img.dataUrl}
+                  className="w-full h-full object-cover hover:opacity-90 transition-opacity pointer-events-none"
+                  alt=""
+                />
+              </div>
+              <span
+                className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 z-30"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeInputImage(idx)
+                }}
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </span>
+            </div>
+          )
+        })}
 
         {/* 清空全部按钮 */}
         <button
