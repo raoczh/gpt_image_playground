@@ -25,19 +25,41 @@ import type { User } from './lib/backendApi'
 import * as backendApi from './lib/backendApi'
 
 // ===== Image cache =====
-// 内存缓存，id → dataUrl，避免每次从 IndexedDB 读取
+// 内存缓存，id → dataUrl，避免每次从 IndexedDB 读取。
+// LRU：超过上限时淘汰最旧。Map 的迭代顺序就是插入顺序，重写前先 delete 可让命中条目"提到最新"。
 
 const imageCache = new Map<string, string>()
+const MAX_IMAGE_CACHE_ENTRIES = 100
+
+function cacheImage(id: string, dataUrl: string) {
+  imageCache.delete(id)
+  imageCache.set(id, dataUrl)
+  while (imageCache.size > MAX_IMAGE_CACHE_ENTRIES) {
+    const oldestKey = imageCache.keys().next().value
+    if (oldestKey === undefined) break
+    imageCache.delete(oldestKey)
+  }
+}
 
 export function getCachedImage(id: string): string | undefined {
-  return imageCache.get(id)
+  const dataUrl = imageCache.get(id)
+  if (dataUrl !== undefined) {
+    imageCache.delete(id)
+    imageCache.set(id, dataUrl)
+  }
+  return dataUrl
 }
 
 export async function ensureImageCached(id: string): Promise<string | undefined> {
-  if (imageCache.has(id)) return imageCache.get(id)
+  const cached = imageCache.get(id)
+  if (cached !== undefined) {
+    imageCache.delete(id)
+    imageCache.set(id, cached)
+    return cached
+  }
   const rec = await getImage(id)
   if (rec) {
-    imageCache.set(id, rec.dataUrl)
+    cacheImage(id, rec.dataUrl)
     return rec.dataUrl
   }
   return undefined
@@ -234,7 +256,7 @@ export async function initStore() {
   const images = await getAllImages()
   for (const img of images) {
     if (referencedIds.has(img.id)) {
-      imageCache.set(img.id, img.dataUrl)
+      cacheImage(img.id, img.dataUrl)
     } else {
       await deleteImage(img.id)
     }
@@ -477,7 +499,7 @@ export async function editOutputs(task: TaskRecord) {
     if (!dataUrl) continue
     const id = await hashDataUrl(dataUrl)
     if (inputImages.find((i) => i.id === id)) continue
-    imageCache.set(id, dataUrl)
+    cacheImage(id, dataUrl)
     addInputImage({ id, dataUrl })
     added++
   }
@@ -650,7 +672,7 @@ export async function importData(file: File) {
       if (!bytes) continue
       const dataUrl = bytesToDataUrl(bytes, info.path)
       await putImage({ id, dataUrl, createdAt: info.createdAt, source: info.source })
-      imageCache.set(id, dataUrl)
+      cacheImage(id, dataUrl)
     }
 
     for (const task of data.tasks) {
@@ -703,7 +725,7 @@ export async function addImageFromFile(file: File): Promise<void> {
       id = await hashDataUrl(dataUrl)
     }
 
-    imageCache.set(id, dataUrl)
+    cacheImage(id, dataUrl)
     useStore.getState().addInputImage({ id, dataUrl })
   } finally {
     decrementPendingImage()
