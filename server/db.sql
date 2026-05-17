@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `is_favorite` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否收藏',
   `error_message` TEXT COMMENT '错误信息',
   `params` JSON COMMENT '生成参数 (size, quality, format, etc.)',
+  `api_profile_id` VARCHAR(50) NULL COMMENT '使用的 API Profile ID',
+  `api_provider` VARCHAR(50) NULL COMMENT 'Provider 类型快照',
+  `api_profile_name` VARCHAR(100) NULL COMMENT 'Profile 名称快照',
+  `api_model` VARCHAR(200) NULL COMMENT '模型 ID 快照',
   `input_image_ids` JSON COMMENT '输入图片 ID 列表',
   `output_image_ids` JSON COMMENT '输出图片 ID 列表',
   `started_at` BIGINT NOT NULL COMMENT '开始时间戳',
@@ -37,6 +41,41 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   INDEX `idx_deleted_at` (`deleted_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务记录表';
+
+-- 用户 API 配置 Profile（一个用户可以保存多个）
+CREATE TABLE IF NOT EXISTS `user_api_profiles` (
+  `id` VARCHAR(50) PRIMARY KEY COMMENT 'Profile ID',
+  `user_id` INT NOT NULL COMMENT '用户 ID',
+  `name` VARCHAR(100) NOT NULL COMMENT 'Profile 名称',
+  `provider` VARCHAR(50) NOT NULL DEFAULT 'openai' COMMENT 'Provider 类型: openai / fal / <custom>',
+  `base_url` VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'API 地址',
+  `api_key` VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'API Key',
+  `model` VARCHAR(200) NOT NULL DEFAULT '' COMMENT '模型 ID',
+  `timeout` INT NOT NULL DEFAULT 600 COMMENT '超时（秒）',
+  `api_format` ENUM('imagen', 'responses') NOT NULL DEFAULT 'responses' COMMENT 'OpenAI 模式：images API 或 Responses API',
+  `extra_settings` JSON COMMENT '其他扩展设置（codexCli/apiProxy/responseFormatB64Json 等）',
+  `is_default` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认 profile',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_user_id` (`user_id`),
+  INDEX `idx_user_default` (`user_id`, `is_default`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户 API 配置 Profile';
+
+-- 自定义 HTTP Provider 定义
+CREATE TABLE IF NOT EXISTS `user_custom_providers` (
+  `id` VARCHAR(50) PRIMARY KEY COMMENT 'Custom provider ID',
+  `user_id` INT NOT NULL COMMENT '用户 ID',
+  `name` VARCHAR(100) NOT NULL COMMENT 'Provider 显示名',
+  `template` VARCHAR(50) NULL COMMENT '模板类型，目前固定 http-image',
+  `submit_config` JSON NOT NULL COMMENT '提交配置',
+  `edit_submit_config` JSON NULL COMMENT '编辑模式提交配置',
+  `poll_config` JSON NULL COMMENT '轮询配置（异步 provider）',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_user_id` (`user_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户自定义 HTTP Provider';
 
 -- 图片表
 CREATE TABLE IF NOT EXISTS `images` (

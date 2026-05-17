@@ -126,12 +126,53 @@ async function fetchImageUrlAsDataUrl(url, fallbackMime, headers, signal) {
   return `data:${contentType};base64,${buffer.toString('base64')}`;
 }
 
-async function loadUserApiSettings(userId) {
+async function loadUserApiSettings(userId, profileId = null) {
+  // 1. 如果指定 profileId，优先从 user_api_profiles 加载该 profile
+  if (profileId) {
+    const [profileRows] = await db.query(
+      'SELECT id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings FROM user_api_profiles WHERE id = ? AND user_id = ?',
+      [profileId, userId]
+    );
+    if (profileRows.length) return profileRowToSettings(profileRows[0]);
+  }
+
+  // 2. 取默认 profile
+  const [defaultRows] = await db.query(
+    'SELECT id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings FROM user_api_profiles WHERE user_id = ? AND is_default = 1 ORDER BY created_at ASC LIMIT 1',
+    [userId]
+  );
+  if (defaultRows.length) return profileRowToSettings(defaultRows[0]);
+
+  // 3. 取该用户第一条 profile（如果有的话）
+  const [firstRows] = await db.query(
+    'SELECT id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings FROM user_api_profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1',
+    [userId]
+  );
+  if (firstRows.length) return profileRowToSettings(firstRows[0]);
+
+  // 4. 回退到旧版 user_settings 表（兼容）
   const [rows] = await db.query(
     'SELECT api_url, api_key, settings FROM user_settings WHERE user_id = ?',
     [userId]
   );
   return resolveApiSettings(rows[0]);
+}
+
+function profileRowToSettings(row) {
+  const extra = row.extra_settings
+    ? (typeof row.extra_settings === 'string' ? JSON.parse(row.extra_settings) : row.extra_settings)
+    : {};
+  return {
+    profileId: row.id,
+    profileName: row.name,
+    provider: row.provider || 'openai',
+    baseUrl: row.base_url || process.env.DEFAULT_API_URL || '',
+    apiKey: row.api_key || process.env.DEFAULT_API_KEY || '',
+    model: row.model || 'gpt-image-1',
+    timeout: Number(row.timeout || 600),
+    apiFormat: row.api_format || 'responses',
+    extra,
+  };
 }
 
 // 上游错误信息 → 中文友好提示的关键词映射。顺序优先：先专业再泛化。
@@ -267,11 +308,11 @@ async function loadInputImageDataUrls(userId, inputImageIds) {
 }
 
 async function callUpstreamImageApi(userId, payload) {
-  console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}`);
-  const apiSettings = await loadUserApiSettings(userId);
+  console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}, profileId=${payload.profileId || 'default'}`);
+  const apiSettings = await loadUserApiSettings(userId, payload.profileId || null);
   const baseUrl = normalizeBaseUrl(apiSettings.baseUrl);
 
-  console.log(`[${new Date().toISOString()}] ⚙️  API Config - BaseURL: ${baseUrl}, Model: ${apiSettings.model}, Timeout: ${apiSettings.timeout}s, Format: ${apiSettings.apiFormat}`);
+  console.log(`[${new Date().toISOString()}] ⚙️  API Config - Provider: ${apiSettings.provider}, BaseURL: ${baseUrl}, Model: ${apiSettings.model}, Timeout: ${apiSettings.timeout}s, Format: ${apiSettings.apiFormat}`);
 
   if (!baseUrl) {
     throw new Error('未配置默认 API URL');
@@ -286,13 +327,52 @@ async function callUpstreamImageApi(userId, payload) {
   const mime = MIME_MAP[params.output_format] || 'image/png';
   const timeout = Math.max(Number(apiSettings.timeout) || 600, 10) * 1000;
   const signal = AbortSignal.timeout(timeout);
+
+  // 路由到 provider 专属实现
+  if (apiSettings.provider === 'fal') {
+    return callFalImageApi({
+      apiSettings,
+      baseUrl,
+      prompt,
+      params,
+      inputImageDataUrls,
+      isEdit,
+      mime,
+      maskDataUrl,
+      maskTargetImageId,
+      signal,
+      timeout,
+    });
+  }
+  if (apiSettings.provider !== 'openai') {
+    // TODO 自定义 HTTP provider 待实现，先按 OpenAI 兼容处理
+    console.warn(`[${new Date().toISOString()}] ⚠️  Provider "${apiSettings.provider}" 暂未实现，回退到 OpenAI 兼容路径`);
+  }
+
+  return callOpenAIImageApi({
+    apiSettings,
+    baseUrl,
+    prompt,
+    params,
+    inputImageDataUrls,
+    isEdit,
+    mime,
+    maskDataUrl,
+    maskTargetImageId,
+    signal,
+    timeout,
+  });
+}
+
+async function callOpenAIImageApi(opts) {
+  const { apiSettings, baseUrl, prompt, params, inputImageDataUrls, isEdit, mime, maskDataUrl, maskTargetImageId, signal } = opts;
   const authHeaders = {
     Authorization: `Bearer ${apiSettings.apiKey}`,
     'Cache-Control': 'no-store, no-cache, max-age=0',
     Pragma: 'no-cache',
   };
 
-  console.log(`[${new Date().toISOString()}] 🔧 Request params - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}, Timeout: ${timeout}ms, Input image IDs: ${inputImageIds?.length || 0}`);
+  console.log(`[${new Date().toISOString()}] 🔧 OpenAI Request - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}`);
 
   if (apiSettings.apiFormat === 'responses') {
     const tool = {
@@ -485,6 +565,86 @@ async function callUpstreamImageApi(userId, payload) {
     throw new Error('接口未返回可用图片数据');
   }
 
+  return { images };
+}
+
+// fal.ai 同步路径：POST https://fal.run/<model>，body JSON 包含 prompt / image_size / image_urls / mask_url 等
+async function callFalImageApi(opts) {
+  const { apiSettings, baseUrl, prompt, params, inputImageDataUrls, isEdit, mime, maskDataUrl, signal } = opts;
+
+  const trimmedModel = (apiSettings.model || 'openai/gpt-image-1').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+  const modelPath = isEdit && !trimmedModel.endsWith('/edit') ? `${trimmedModel}/edit` : trimmedModel;
+  const falRoot = baseUrl.replace(/\/+$/, '') || 'https://fal.run';
+  const endpoint = `${falRoot}/${modelPath}`;
+
+  // 把图片 dataUrl 直接当作 image_urls 数组（fal 兼容 data URL）
+  const body = {
+    prompt,
+    quality: params.quality === 'auto' ? 'high' : params.quality,
+    num_images: Math.min(4, Math.max(1, params.n || 1)),
+    output_format: params.output_format,
+  };
+
+  // 解析尺寸
+  const sizeMatch = String(params.size || '').match(/^(\d+)x(\d+)$/);
+  if (sizeMatch) {
+    body.image_size = { width: Number(sizeMatch[1]), height: Number(sizeMatch[2]) };
+  } else if (isEdit && params.size === 'auto') {
+    body.image_size = 'auto';
+  } else {
+    body.image_size = { width: 1360, height: 1024 };
+  }
+
+  if (isEdit) body.image_urls = inputImageDataUrls;
+  if (maskDataUrl) body.mask_url = maskDataUrl;
+
+  const headers = {
+    Authorization: `Key ${apiSettings.apiKey}`,
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store, no-cache, max-age=0',
+    Pragma: 'no-cache',
+  };
+
+  console.log(`[${new Date().toISOString()}] 🚀 Calling fal.ai - Endpoint: ${endpoint}`);
+  const fetchStartTime = Date.now();
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    cache: 'no-store',
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
+  console.log(`[${new Date().toISOString()}] 📥 fal.ai response - Status: ${response.status}, Time: ${fetchElapsed}s`);
+
+  if (!response.ok) {
+    await parseUpstreamError(response);
+  }
+
+  const payload = await response.json();
+  const items = Array.isArray(payload?.images) ? payload.images : Array.isArray(payload?.data) ? payload.data : [];
+  const images = [];
+  for (const item of items) {
+    if (typeof item === 'string') {
+      images.push(item.startsWith('data:') || item.startsWith('http') ? (item.startsWith('http') ? await fetchImageUrlAsDataUrl(item, mime, {}, signal) : item) : normalizeBase64Image(item, mime));
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    if (typeof item.url === 'string') {
+      images.push(item.url.startsWith('data:') ? item.url : await fetchImageUrlAsDataUrl(item.url, mime, {}, signal));
+      continue;
+    }
+    if (typeof item.b64_json === 'string') {
+      images.push(normalizeBase64Image(item.b64_json, mime));
+      continue;
+    }
+    if (typeof item.base64 === 'string') {
+      images.push(normalizeBase64Image(item.base64, mime));
+      continue;
+    }
+  }
+  if (!images.length) throw new Error('fal.ai 未返回可用图片数据');
   return { images };
 }
 
@@ -768,6 +928,335 @@ app.post('/api/settings', requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Update settings error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== API Profiles 路由 ====================
+
+function generateProfileId() {
+  return `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function maskApiKey(key) {
+  return key ? '••••••••••••••••' : '';
+}
+
+function profileRowToJson(row) {
+  const extra = row.extra_settings
+    ? (typeof row.extra_settings === 'string' ? JSON.parse(row.extra_settings) : row.extra_settings)
+    : {};
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider || 'openai',
+    base_url: row.base_url || '',
+    api_key_masked: maskApiKey(row.api_key),
+    model: row.model || '',
+    timeout: Number(row.timeout || 600),
+    api_format: row.api_format || 'responses',
+    extra,
+    is_default: Boolean(row.is_default),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+app.get('/api/profiles', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings, is_default, created_at, updated_at FROM user_api_profiles WHERE user_id = ? ORDER BY is_default DESC, created_at ASC',
+      [req.session.userId]
+    );
+
+    // 如果该用户还没有 profile，但 user_settings 表有旧记录，自动迁移一条默认 profile
+    if (!rows.length) {
+      const [legacyRows] = await db.query(
+        'SELECT api_url, api_key, settings FROM user_settings WHERE user_id = ?',
+        [req.session.userId]
+      );
+      if (legacyRows.length) {
+        const legacy = legacyRows[0];
+        const settings = legacy.settings
+          ? (typeof legacy.settings === 'string' ? JSON.parse(legacy.settings) : legacy.settings)
+          : {};
+        const id = `default-${req.session.userId}`;
+        await db.query(
+          `INSERT INTO user_api_profiles (id, user_id, name, provider, base_url, api_key, model, timeout, api_format, is_default)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          [
+            id,
+            req.session.userId,
+            '默认',
+            'openai',
+            legacy.api_url || '',
+            legacy.api_key || '',
+            settings.model || 'gpt-image-1',
+            Number(settings.timeout || 600),
+            settings.apiFormat || 'responses',
+          ]
+        );
+        return res.json({
+          profiles: [
+            {
+              id,
+              name: '默认',
+              provider: 'openai',
+              base_url: legacy.api_url || '',
+              api_key_masked: maskApiKey(legacy.api_key),
+              model: settings.model || 'gpt-image-1',
+              timeout: Number(settings.timeout || 600),
+              api_format: settings.apiFormat || 'responses',
+              extra: {},
+              is_default: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ],
+        });
+      }
+    }
+
+    res.json({ profiles: rows.map(profileRowToJson) });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Get profiles error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/profiles', requireAuth, async (req, res) => {
+  try {
+    const { name, provider, base_url, api_key, model, timeout, api_format, extra, is_default } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name 不能为空' });
+    }
+    const id = generateProfileId();
+    const profile = {
+      id,
+      name: name.trim().slice(0, 100),
+      provider: typeof provider === 'string' && provider ? provider : 'openai',
+      base_url: typeof base_url === 'string' ? base_url : '',
+      api_key: typeof api_key === 'string' ? api_key : '',
+      model: typeof model === 'string' ? model : '',
+      timeout: Math.max(10, Math.min(3600, Number(timeout) || 600)),
+      api_format: api_format === 'imagen' ? 'imagen' : 'responses',
+      extra_settings: extra && typeof extra === 'object' ? JSON.stringify(extra) : null,
+      is_default: is_default ? 1 : 0,
+    };
+
+    if (profile.is_default) {
+      await db.query('UPDATE user_api_profiles SET is_default = 0 WHERE user_id = ?', [req.session.userId]);
+    }
+
+    await db.query(
+      `INSERT INTO user_api_profiles (id, user_id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings, is_default)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        profile.id,
+        req.session.userId,
+        profile.name,
+        profile.provider,
+        profile.base_url,
+        profile.api_key,
+        profile.model,
+        profile.timeout,
+        profile.api_format,
+        profile.extra_settings,
+        profile.is_default,
+      ]
+    );
+
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Create profile error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/profiles/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, provider, base_url, api_key, model, timeout, api_format, extra } = req.body || {};
+
+    const updates = [];
+    const params = [];
+    if (typeof name === 'string' && name.trim()) {
+      updates.push('name = ?');
+      params.push(name.trim().slice(0, 100));
+    }
+    if (typeof provider === 'string' && provider) {
+      updates.push('provider = ?');
+      params.push(provider);
+    }
+    if (typeof base_url === 'string') {
+      updates.push('base_url = ?');
+      params.push(base_url);
+    }
+    if (typeof api_key === 'string') {
+      updates.push('api_key = ?');
+      params.push(api_key);
+    }
+    if (typeof model === 'string') {
+      updates.push('model = ?');
+      params.push(model);
+    }
+    if (timeout !== undefined) {
+      updates.push('timeout = ?');
+      params.push(Math.max(10, Math.min(3600, Number(timeout) || 600)));
+    }
+    if (api_format !== undefined) {
+      updates.push('api_format = ?');
+      params.push(api_format === 'imagen' ? 'imagen' : 'responses');
+    }
+    if (extra !== undefined) {
+      updates.push('extra_settings = ?');
+      params.push(extra && typeof extra === 'object' ? JSON.stringify(extra) : null);
+    }
+
+    if (!updates.length) return res.status(400).json({ error: '没有需要更新的字段' });
+
+    params.push(id, req.session.userId);
+    const [result] = await db.query(
+      `UPDATE user_api_profiles SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`,
+      params
+    );
+
+    if (!result.affectedRows) return res.status(404).json({ error: 'Profile 不存在' });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Update profile error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/profiles/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // 不允许删掉最后一个 profile
+    const [rows] = await db.query('SELECT COUNT(*) AS count FROM user_api_profiles WHERE user_id = ?', [req.session.userId]);
+    if (rows[0].count <= 1) {
+      return res.status(400).json({ error: '至少保留一个 Profile' });
+    }
+    const [result] = await db.query('DELETE FROM user_api_profiles WHERE id = ? AND user_id = ?', [id, req.session.userId]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'Profile 不存在' });
+
+    // 如果删的是默认 profile，把第一条变成默认
+    const [defRows] = await db.query('SELECT COUNT(*) AS count FROM user_api_profiles WHERE user_id = ? AND is_default = 1', [req.session.userId]);
+    if (defRows[0].count === 0) {
+      await db.query(
+        'UPDATE user_api_profiles SET is_default = 1 WHERE id = (SELECT id FROM (SELECT id FROM user_api_profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1) AS t)',
+        [req.session.userId]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Delete profile error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/profiles/:id/default', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.query('UPDATE user_api_profiles SET is_default = 0 WHERE user_id = ?', [req.session.userId]);
+    const [result] = await db.query(
+      'UPDATE user_api_profiles SET is_default = 1 WHERE id = ? AND user_id = ?',
+      [id, req.session.userId]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Profile 不存在' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Set default profile error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== Custom Providers 路由 ====================
+
+app.get('/api/custom-providers', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, name, template, submit_config, edit_submit_config, poll_config, created_at, updated_at FROM user_custom_providers WHERE user_id = ? ORDER BY created_at ASC',
+      [req.session.userId]
+    );
+    const items = rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      template: row.template,
+      submit: row.submit_config ? (typeof row.submit_config === 'string' ? JSON.parse(row.submit_config) : row.submit_config) : null,
+      editSubmit: row.edit_submit_config ? (typeof row.edit_submit_config === 'string' ? JSON.parse(row.edit_submit_config) : row.edit_submit_config) : null,
+      poll: row.poll_config ? (typeof row.poll_config === 'string' ? JSON.parse(row.poll_config) : row.poll_config) : null,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }));
+    res.json({ providers: items });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Get custom providers error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/custom-providers', requireAuth, async (req, res) => {
+  try {
+    const { name, template, submit, editSubmit, poll } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'name 不能为空' });
+    if (!submit || typeof submit !== 'object') return res.status(400).json({ error: 'submit 配置必填' });
+    const id = `cp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    await db.query(
+      `INSERT INTO user_custom_providers (id, user_id, name, template, submit_config, edit_submit_config, poll_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        req.session.userId,
+        name.trim().slice(0, 100),
+        typeof template === 'string' ? template : 'http-image',
+        JSON.stringify(submit),
+        editSubmit ? JSON.stringify(editSubmit) : null,
+        poll ? JSON.stringify(poll) : null,
+      ]
+    );
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Create custom provider error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/custom-providers/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, template, submit, editSubmit, poll } = req.body || {};
+    const updates = [];
+    const params = [];
+    if (typeof name === 'string' && name.trim()) { updates.push('name = ?'); params.push(name.trim().slice(0, 100)); }
+    if (typeof template === 'string') { updates.push('template = ?'); params.push(template); }
+    if (submit !== undefined) { updates.push('submit_config = ?'); params.push(submit ? JSON.stringify(submit) : null); }
+    if (editSubmit !== undefined) { updates.push('edit_submit_config = ?'); params.push(editSubmit ? JSON.stringify(editSubmit) : null); }
+    if (poll !== undefined) { updates.push('poll_config = ?'); params.push(poll ? JSON.stringify(poll) : null); }
+    if (!updates.length) return res.status(400).json({ error: '没有需要更新的字段' });
+    params.push(id, req.session.userId);
+    const [result] = await db.query(
+      `UPDATE user_custom_providers SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`,
+      params
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Custom provider 不存在' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Update custom provider error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/custom-providers/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [result] = await db.query('DELETE FROM user_custom_providers WHERE id = ? AND user_id = ?', [id, req.session.userId]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'Custom provider 不存在' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Delete custom provider error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
