@@ -70,6 +70,8 @@ export interface TaskRecord {
   /** 输出图片的缩略图 URL 列表（与 outputImages 一一对应；缺失时为空串） */
   outputThumbnails: string[]
   status: TaskStatus
+  /** 是否收藏 */
+  isFavorite: boolean
   error: string | null
   createdAt: number
   finishedAt: number | null

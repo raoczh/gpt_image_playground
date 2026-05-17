@@ -7,12 +7,13 @@ export default function TaskGrid() {
   const user = useStore((s) => s.user)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
+  const filterFavorite = useStore((s) => s.filterFavorite)
   const tasksLoading = useStore((s) => s.tasksLoading)
   const tasksHasMore = useStore((s) => s.tasksHasMore)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
-  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus 变化时 debounce reload。
+  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite 变化时 debounce reload。
   // 用 ref 跳过首次 effect 避免重复请求。
   const skipFirstRef = useRef(true)
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function TaskGrid() {
       loadTasksFirstPage().catch(console.error)
     }, 300)
     return () => clearTimeout(handle)
-  }, [user, searchQuery, filterStatus])
+  }, [user, searchQuery, filterStatus, filterFavorite])
 
   // 滚动到底部时拉下一页
   const sentinelRef = useRef<HTMLDivElement | null>(null)
@@ -58,7 +59,7 @@ export default function TaskGrid() {
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
         {tasksLoading ? (
           <p className="text-sm">加载中...</p>
-        ) : searchQuery || filterStatus !== 'all' ? (
+        ) : searchQuery || filterStatus !== 'all' || filterFavorite ? (
           <p className="text-sm">没有找到匹配的记录</p>
         ) : (
           <>

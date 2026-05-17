@@ -119,6 +119,9 @@ interface AppState {
   setSearchQuery: (q: string) => void
   filterStatus: 'all' | 'running' | 'done' | 'error'
   setFilterStatus: (status: AppState['filterStatus']) => void
+  filterFavorite: boolean
+  setFilterFavorite: (favorite: boolean) => void
+  toggleTaskFavorite: (taskId: string) => Promise<void>
 
   // UI
   detailTaskId: string | null
@@ -209,6 +212,33 @@ export const useStore = create<AppState>()(
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   filterStatus: 'all',
   setFilterStatus: (filterStatus) => set({ filterStatus }),
+  filterFavorite: false,
+  setFilterFavorite: (filterFavorite) => set({ filterFavorite }),
+  toggleTaskFavorite: async (taskId) => {
+    const state = useStore.getState()
+    const target = state.tasks.find((t) => t.id === taskId)
+    if (!target) return
+    const next = !target.isFavorite
+    // 乐观更新
+    set({
+      tasks: state.tasks.map((t) =>
+        t.id === taskId ? { ...t, isFavorite: next } : t,
+      ),
+    })
+    try {
+      await backendApi.setTaskFavorite(taskId, next)
+    } catch (error) {
+      // 回滚
+      const current = useStore.getState().tasks
+      set({
+        tasks: current.map((t) =>
+          t.id === taskId ? { ...t, isFavorite: !next } : t,
+        ),
+      })
+      useStore.getState().showToast('收藏操作失败', 'error')
+      throw error
+    }
+  },
 
   // UI
   detailTaskId: null,
@@ -286,6 +316,7 @@ function toTaskRecord(t: backendApi.Task): TaskRecord {
     outputImages: t.output_image_urls || [],
     outputThumbnails: t.output_thumb_urls || [],
     status: t.status,
+    isFavorite: Boolean(t.is_favorite),
     error: t.error_message || null,
     createdAt: t.started_at,
     finishedAt: t.finished_at || null,
@@ -298,7 +329,7 @@ let currentLoadSeq = 0
 
 /** 拉第一页任务（重置 cursor）。搜索 / 过滤变化时调。已运行中的任务会保留在最前面，避免刚提交的 task 被刷掉。 */
 export async function loadTasksFirstPage() {
-  const { user, searchQuery, filterStatus } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite } = useStore.getState()
   if (!user) {
     useStore.setState({ tasks: [], tasksCursor: null, tasksHasMore: false })
     return
@@ -306,7 +337,7 @@ export async function loadTasksFirstPage() {
   const mySeq = ++currentLoadSeq
   useStore.setState({ tasksLoading: true })
   try {
-    const page = await backendApi.getTasks({ q: searchQuery, status: filterStatus })
+    const page = await backendApi.getTasks({ q: searchQuery, status: filterStatus, favorite: filterFavorite })
     if (mySeq !== currentLoadSeq) return // 已被更新请求覆盖
     const items = page.items.map(toTaskRecord)
     const runningTasks = useStore.getState().tasks.filter((t) => t.status === 'running')
@@ -330,11 +361,11 @@ export async function loadTasksFirstPage() {
 
 /** 追加下一页。由滚动到底部触发，幂等。 */
 export async function loadMoreTasks() {
-  const { user, searchQuery, filterStatus, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
   if (!user || tasksLoading || !tasksHasMore || !tasksCursor) return
   useStore.setState({ tasksLoading: true })
   try {
-    const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus })
+    const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus, favorite: filterFavorite })
     const items = page.items.map(toTaskRecord)
     useStore.setState((s) => ({
       tasks: [...s.tasks, ...items.filter((t) => !s.tasks.find((x) => x.id === t.id))],
@@ -385,6 +416,7 @@ export async function submitTask() {
     outputImages: [],
     outputThumbnails: [],
     status: 'running',
+    isFavorite: false,
     error: null,
     createdAt: Date.now(),
     finishedAt: null,

@@ -92,6 +92,7 @@ export interface Task {
   user_id: number;
   prompt: string;
   status: 'running' | 'done' | 'error';
+  is_favorite?: number | boolean;
   error_message?: string;
   params: Record<string, any>;
   input_image_ids: string[];
@@ -116,6 +117,7 @@ export interface GetTasksOpts {
   limit?: number;
   q?: string;
   status?: 'all' | 'running' | 'done' | 'error';
+  favorite?: boolean;
 }
 
 export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
@@ -124,6 +126,7 @@ export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.q) params.set('q', opts.q);
   if (opts.status && opts.status !== 'all') params.set('status', opts.status);
+  if (opts.favorite) params.set('favorite', '1');
   const query = params.toString();
   return apiRequest(query ? `/api/tasks?${query}` : '/api/tasks');
 }
@@ -153,6 +156,13 @@ export async function updateTask(
   await apiRequest(`/api/tasks/${id}`, {
     method: 'PUT',
     body: JSON.stringify(updates),
+  });
+}
+
+export async function setTaskFavorite(id: string, isFavorite: boolean): Promise<void> {
+  await apiRequest(`/api/tasks/${id}/favorite`, {
+    method: 'PUT',
+    body: JSON.stringify({ isFavorite }),
   });
 }
 

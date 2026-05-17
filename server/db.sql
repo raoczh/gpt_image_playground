@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `user_id` INT NOT NULL COMMENT '用户 ID',
   `prompt` TEXT NOT NULL COMMENT '生成提示词',
   `status` ENUM('running', 'done', 'error') DEFAULT 'running' COMMENT '任务状态',
+  `is_favorite` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否收藏',
   `error_message` TEXT COMMENT '错误信息',
   `params` JSON COMMENT '生成参数 (size, quality, format, etc.)',
   `input_image_ids` JSON COMMENT '输入图片 ID 列表',
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_status` (`status`),
+  INDEX `idx_favorite` (`is_favorite`),
   INDEX `idx_created_at` (`created_at`),
   INDEX `idx_deleted_at` (`deleted_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE

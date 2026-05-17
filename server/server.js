@@ -769,6 +769,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const status = ['running', 'done', 'error'].includes(req.query.status) ? req.query.status : 'all';
+    const onlyFavorite = req.query.favorite === '1' || req.query.favorite === 'true';
 
     let cursorTs = null;
     let cursorId = null;
@@ -791,6 +792,9 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     if (status !== 'all') {
       where.push('status = ?');
       params.push(status);
+    }
+    if (onlyFavorite) {
+      where.push('is_favorite = 1');
     }
     if (q) {
       where.push('prompt LIKE ?');
@@ -898,6 +902,28 @@ app.put('/api/tasks/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Update task error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/tasks/:id/favorite', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const next = req.body && req.body.isFavorite ? 1 : 0;
+    console.log(`[${new Date().toISOString()}] ⭐ Toggle favorite - Task ID: ${id}, isFavorite: ${next}`);
+
+    const [result] = await db.query(
+      'UPDATE tasks SET is_favorite = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [next, id, req.session.userId]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    res.json({ success: true, isFavorite: Boolean(next) });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Toggle favorite error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
