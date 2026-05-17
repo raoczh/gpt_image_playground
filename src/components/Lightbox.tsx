@@ -13,7 +13,20 @@ export default function Lightbox() {
   const lightboxImageId = useStore((s) => s.lightboxImageId)
   const lightboxImageList = useStore((s) => s.lightboxImageList)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
+  const maskDraft = useStore((s) => s.maskDraft)
+  const inputImages = useStore((s) => s.inputImages)
   const [src, setSrc] = useState('')
+
+  // 如果当前 lightbox 显示的图是 maskDraft 的目标参考图，叠加红色蒙版预览
+  const maskOverlaySrc = (() => {
+    if (!maskDraft || !lightboxImageId) return ''
+    const target = inputImages.find((img) => img.id === maskDraft.targetImageId)
+    if (!target) return ''
+    if (target.dataUrl === lightboxImageId || target.id === lightboxImageId) {
+      return maskDraft.maskDataUrl
+    }
+    return ''
+  })()
 
   const close = useCallback(() => setLightboxImageId(null), [setLightboxImageId])
   useCloseOnEscape(Boolean(lightboxImageId), close)
@@ -58,6 +71,7 @@ export default function Lightbox() {
   return (
     <LightboxInner
       src={src}
+      maskOverlaySrc={maskOverlaySrc}
       onClose={close}
       showNav={showNav}
       currentIndex={currentIndex}
@@ -70,6 +84,7 @@ export default function Lightbox() {
 
 interface LightboxInnerProps {
   src: string
+  maskOverlaySrc: string
   onClose: () => void
   showNav: boolean
   currentIndex: number
@@ -79,7 +94,7 @@ interface LightboxInnerProps {
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
-function LightboxInner({ src, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
+function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // 用 ref 追踪最新变换，避免闭包过期
@@ -400,6 +415,25 @@ function LightboxInner({ src, onClose, showNav, currentIndex, total, onPrev, onN
           onDragStart={(e) => e.preventDefault()}
           alt=""
         />
+        {maskOverlaySrc && (
+          <>
+            <img
+              src={maskOverlaySrc}
+              className="pointer-events-none absolute inset-0 max-w-[85vw] max-h-[85vh] object-contain rounded-lg mix-blend-screen opacity-60"
+              style={{
+                transform: `translate(${tx}px, ${ty}px) scale(${s})`,
+                transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+                willChange: 'transform',
+                filter: 'drop-shadow(0 0 0 rgba(0,0,0,0)) hue-rotate(0deg) saturate(8) brightness(1.1)',
+              }}
+              onDragStart={(e) => e.preventDefault()}
+              alt=""
+            />
+            <span className="absolute top-3 left-3 px-2 py-1 rounded-full bg-red-500/80 text-white text-[10px] font-medium backdrop-blur-sm pointer-events-none">
+              蒙版预览
+            </span>
+          </>
+        )}
       </div>
 
       {/* 左右切换按钮 */}

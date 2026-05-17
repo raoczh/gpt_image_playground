@@ -1,9 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { useStore } from '../store'
+import { useStore, addImageFromUrl } from '../store'
 
 export default function ImageContextMenu() {
-  const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number } | null>(null)
+  const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number; inIframe: boolean } | null>(null)
   const showToast = useStore((s) => s.showToast)
+  const setDetailTaskId = useStore((s) => s.setDetailTaskId)
+  const setLightboxImageId = useStore((s) => s.setLightboxImageId)
+  const setShowSettings = useStore((s) => s.setShowSettings)
+  const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -13,6 +17,9 @@ export default function ImageContextMenu() {
         const imgTarget = target as HTMLImageElement
         // 忽略没有 src 或空的 img
         if (!imgTarget.src) return
+
+        // iframe 内的图不弹自定义菜单，保留浏览器默认行为
+        if (window.self !== window.top) return
 
         // iOS 触控设备上放行原生长按菜单（含「存储图像」）
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -26,6 +33,7 @@ export default function ImageContextMenu() {
           src: originalSrc || imgTarget.src,
           x: e.clientX,
           y: e.clientY,
+          inIframe: false,
         })
       }
     }
@@ -103,11 +111,28 @@ export default function ImageContextMenu() {
     }
   }
 
+  const handleEdit = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const src = menuInfo.src
+    setMenuInfo(null)
+    // 关闭所有模态，回到主界面以便看到 InputBar 里新加的图
+    setDetailTaskId(null)
+    setLightboxImageId(null)
+    setShowSettings(false)
+    setMaskEditorImageId(null)
+    try {
+      await addImageFromUrl(src)
+    } catch (err) {
+      console.error(err)
+      showToast('添加到输入失败', 'error')
+    }
+  }
+
   // 保证菜单在视口内
   let left = menuInfo.x
   let top = menuInfo.y
   const MENU_WIDTH = 120
-  const MENU_HEIGHT = 88 // 两个按钮高度加 padding
+  const MENU_HEIGHT = 132 // 三个按钮高度加 padding
 
   if (left + MENU_WIDTH > window.innerWidth) {
     left -= MENU_WIDTH
@@ -140,6 +165,15 @@ export default function ImageContextMenu() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
         下载
+      </button>
+      <button
+        onClick={handleEdit}
+        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+      >
+        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        编辑
       </button>
     </div>
   )

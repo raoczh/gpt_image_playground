@@ -2,6 +2,63 @@ import { useMemo, useState } from 'react'
 import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
+
+const SIZE_LIMIT_TEXT = '宽高 16 的倍数 · 最大边 3840 · 比例 ≤ 3:1 · 总像素 655360-8294400'
+
+const MIN_PIXELS = 655_360
+const MAX_PIXELS = 8_294_400
+const MAX_SIDE = 3840
+const MIN_SIDE = 256
+const MAX_RATIO = 3 // 长短边比例
+
+function clampSize(rawW: number, rawH: number) {
+  if (!Number.isFinite(rawW) || !Number.isFinite(rawH) || rawW <= 0 || rawH <= 0) {
+    return { width: rawW, height: rawH, clamped: false }
+  }
+
+  let w = rawW
+  let h = rawH
+
+  // 限制最长边
+  const longest = Math.max(w, h)
+  if (longest > MAX_SIDE) {
+    const k = MAX_SIDE / longest
+    w *= k
+    h *= k
+  }
+
+  // 限制最短边
+  const shortest = Math.min(w, h)
+  if (shortest < MIN_SIDE) {
+    const k = MIN_SIDE / shortest
+    w *= k
+    h *= k
+  }
+
+  // 限制比例 ≤ 3:1
+  const ratio = Math.max(w, h) / Math.min(w, h)
+  if (ratio > MAX_RATIO) {
+    if (w > h) w = h * MAX_RATIO
+    else h = w * MAX_RATIO
+  }
+
+  // 限制总像素
+  const pixels = w * h
+  if (pixels > MAX_PIXELS) {
+    const k = Math.sqrt(MAX_PIXELS / pixels)
+    w *= k
+    h *= k
+  } else if (pixels < MIN_PIXELS) {
+    const k = Math.sqrt(MIN_PIXELS / pixels)
+    w *= k
+    h *= k
+  }
+
+  const finalW = Math.round(w / 16) * 16
+  const finalH = Math.round(h / 16) * 16
+  const clamped = finalW !== Math.round(rawW / 16) * 16 || finalH !== Math.round(rawH / 16) * 16
+  return { width: finalW, height: finalH, clamped }
+}
 const RATIOS = [
   { label: '1:1', value: '1:1' },
   { label: '3:2', value: '3:2' },
@@ -60,24 +117,27 @@ export default function SizePickerModal({ currentSize, onSelect, onClose }: Prop
   const activeRatio = ratio === 'custom' ? customRatio : ratio
   const customRatioValid = ratio !== 'custom' || Boolean(parseRatio(customRatio))
 
-  const previewSize = useMemo(() => {
-    if (mode === 'auto') return 'auto'
-    
+  const { previewSize, isClamped } = useMemo(() => {
+    if (mode === 'auto') return { previewSize: 'auto', isClamped: false }
+
     if (mode === 'ratio') {
       const size = calculateImageSize(tier, activeRatio)
-      return size ? normalizeImageSize(size) : ''
+      return { previewSize: size ? normalizeImageSize(size) : '', isClamped: false }
     }
-    
+
     if (mode === 'resolution') {
       const w = parseInt(customW, 10)
       const h = parseInt(customH, 10)
       if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-        return normalizeImageSize(`${w}x${h}`)
+        const c = clampSize(w, h)
+        if (Number.isFinite(c.width) && Number.isFinite(c.height) && c.width > 0 && c.height > 0) {
+          return { previewSize: `${c.width}x${c.height}`, isClamped: c.clamped }
+        }
       }
-      return ''
+      return { previewSize: '', isClamped: false }
     }
-    
-    return ''
+
+    return { previewSize: '', isClamped: false }
   }, [mode, tier, activeRatio, customW, customH])
 
   const applySize = () => {
@@ -243,10 +303,23 @@ export default function SizePickerModal({ currentSize, onSelect, onClose }: Prop
           </div>
 
           <div className="rounded-2xl bg-gray-50 px-4 py-3 dark:bg-white/[0.03]">
-            <div className="text-xs text-gray-400 dark:text-gray-500">将使用</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-gray-400 dark:text-gray-500">将使用</div>
+              {isClamped && (
+                <span
+                  className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 text-[10px] font-medium"
+                  title={SIZE_LIMIT_TEXT}
+                >
+                  已自动调整
+                </span>
+              )}
+            </div>
             <div className="mt-1 font-mono text-lg font-semibold text-gray-800 dark:text-gray-100">
               {previewSize || '尺寸无效'}
             </div>
+          </div>
+          <div className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed">
+            限制：{SIZE_LIMIT_TEXT}
           </div>
         </div>
 

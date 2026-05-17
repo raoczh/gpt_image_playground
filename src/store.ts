@@ -932,6 +932,59 @@ export async function addImageFromFile(file: File): Promise<void> {
   }
 }
 
+/**
+ * 从图片 URL（远程或 data URL）加入到当前 inputImages。
+ * 已登录时走后端落盘以保持 id 一致；未登录走本地 hash。
+ * 用于"右键 → 编辑"等"基于已有图二次生成"入口。
+ */
+export async function addImageFromUrl(url: string): Promise<void> {
+  if (!url) return
+  const { incrementPendingImage, decrementPendingImage } = useStore.getState()
+  incrementPendingImage()
+  try {
+    let dataUrl = url
+    if (!url.startsWith('data:')) {
+      const resp = await fetch(url, { credentials: 'include' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const blob = await resp.blob()
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(blob)
+      })
+    }
+
+    let id: string
+    const { user } = useStore.getState()
+    if (user) {
+      try {
+        const saved = await backendApi.saveImage(dataUrl, 'generated')
+        id = saved.id
+      } catch (error) {
+        useStore.getState().showToast(
+          `添加到输入失败：${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        )
+        return
+      }
+    } else {
+      id = await hashDataUrl(dataUrl)
+    }
+
+    const state = useStore.getState()
+    if (state.inputImages.find((i) => i.id === id)) {
+      state.showToast('该图已在输入区', 'info')
+      return
+    }
+    cacheImage(id, dataUrl)
+    state.addInputImage({ id, dataUrl })
+    state.showToast('已添加到输入', 'success')
+  } finally {
+    decrementPendingImage()
+  }
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

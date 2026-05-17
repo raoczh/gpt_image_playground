@@ -1,12 +1,51 @@
 import { useStore } from '../store'
 import { redirectToGitHubLogin, logout } from '../lib/backendApi'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import HelpModal from './HelpModal'
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
+function detectIosOrWeChat() {
+  const ua = navigator.userAgent
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const isWeChat = /MicroMessenger/i.test(ua)
+  return { isIOS, isWeChat }
+}
 
 export default function Header() {
   const user = useStore((s) => s.user)
   const setUser = useStore((s) => s.setUser)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const showToast = useStore((s) => s.showToast)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  const [isStandalone, setIsStandalone] = useState(false)
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+    setIsStandalone(standalone)
+
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault()
+      setInstallEvent(e as BeforeInstallPromptEvent)
+    }
+    const onAppInstalled = () => {
+      setInstallEvent(null)
+      setIsStandalone(true)
+    }
+    window.addEventListener('beforeinstallprompt', onBeforeInstall)
+    window.addEventListener('appinstalled', onAppInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+      window.removeEventListener('appinstalled', onAppInstalled)
+    }
+  }, [])
 
   const handleLogout = async () => {
     try {
@@ -18,6 +57,29 @@ export default function Header() {
     }
   }
 
+  const handleInstall = async () => {
+    if (installEvent) {
+      try {
+        await installEvent.prompt()
+        await installEvent.userChoice
+      } finally {
+        setInstallEvent(null)
+      }
+      return
+    }
+    // iOS / 微信内置浏览器没有 beforeinstallprompt，给出文字提示
+    const { isIOS, isWeChat } = detectIosOrWeChat()
+    if (isWeChat) {
+      showToast('请点击右上角菜单 → 在浏览器中打开后再安装', 'info')
+    } else if (isIOS) {
+      showToast('请点击 Safari 分享按钮 → "添加到主屏幕"', 'info')
+    } else {
+      showToast('请在浏览器菜单中选择"安装应用"', 'info')
+    }
+  }
+
+  const showInstallButton = !isStandalone
+
   return (
     <header className="safe-area-top sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
       <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
@@ -25,6 +87,34 @@ export default function Header() {
           GPT Image Playground
         </h1>
         <div className="flex items-center gap-2">
+          {showInstallButton && (
+            <button
+              onClick={handleInstall}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-gray-600 dark:text-gray-400"
+              title="安装应用"
+              aria-label="安装应用"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowHelp(true)}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-gray-600 dark:text-gray-400"
+            title="操作指南"
+            aria-label="操作指南"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <path d="M12 17h.01" />
+            </svg>
+          </button>
+
           {/* 用户信息或登录按钮 */}
           {user ? (
             <div className="relative">
@@ -106,6 +196,7 @@ export default function Header() {
           </button>
         </div>
       </div>
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </header>
   )
 }
