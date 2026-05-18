@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, type AppSettings, type ApiFormat } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import * as backendApi from '../lib/backendApi'
 import { buildShareUrl, parseImportInput } from '../lib/urlSettings'
+import MyQuotaCard from './MyQuotaCard'
 
 const PROVIDER_OPTIONS: { value: string; label: string }[] = [
   { value: 'openai', label: 'OpenAI 兼容' },
@@ -296,6 +297,7 @@ export default function SettingsModal() {
         </div>
 
         <div className="space-y-6">
+          {user && <MyQuotaCard />}
           <section>
             <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
               <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

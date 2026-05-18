@@ -11,6 +11,11 @@ import fs from 'fs/promises';
 import axios from 'axios';
 import sharp from 'sharp';
 import db from './db.js';
+import { requireAuth, requireAdmin, requireSession, invalidateUserCache } from './auth.js';
+import createAdminRouter from './adminRouter.js';
+import { getSystemConfig } from './systemConfig.js';
+import { checkDailyGenerationQuota, checkStorageQuota, getQuotaSummary } from './quota.js';
+import { logAudit } from './audit.js';
 
 dotenv.config();
 
@@ -624,6 +629,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Session 配置
+const sessionStoreInstance = redisClient ? new RedisStore({ client: redisClient }) : null;
 const sessionConfig = {
   name: sessionCookieName,
   secret: process.env.SESSION_SECRET,
@@ -633,11 +639,54 @@ const sessionConfig = {
   cookie: sessionCookieOptions,
 };
 
-if (redisClient) {
-  sessionConfig.store = new RedisStore({ client: redisClient });
+if (sessionStoreInstance) {
+  sessionConfig.store = sessionStoreInstance;
 }
 
 app.use(session(sessionConfig));
+
+// 维护模式中间件：开启时拒绝业务请求，但 admin 永远可访问、auth 路由保留
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (req.path.startsWith('/api/admin')) return next();
+  if (req.path.startsWith('/api/auth')) return next();
+  if (req.path.startsWith('/api/public')) return next();
+  if (req.path === '/api/quota') return next();
+  try {
+    const enabled = await getSystemConfig('maintenance_mode');
+    if (enabled === true) {
+      const message = (await getSystemConfig('maintenance_message')) || '系统维护中，请稍后再试';
+      return res.status(503).json({ error: 'maintenance', message });
+    }
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] ⚠️  Maintenance mode check failed: ${err.message}`);
+  }
+  next();
+});
+
+// 公开配置接口：前端横幅 / 维护页 / 登录前展示用，无需认证
+app.get('/api/public/site-config', async (_req, res) => {
+  try {
+    const [maintenance, message, announcement, registrationMode, reviewMessage] = await Promise.all([
+      getSystemConfig('maintenance_mode'),
+      getSystemConfig('maintenance_message'),
+      getSystemConfig('announcement'),
+      getSystemConfig('registration_mode'),
+      getSystemConfig('review_message'),
+    ]);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      maintenance_mode: maintenance === true,
+      maintenance_message: message || '',
+      announcement: announcement || null,
+      registration_mode: registrationMode || 'open',
+      review_message: reviewMessage || '',
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Site config error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // 图片上传配置
 const storage = multer.diskStorage({
@@ -665,15 +714,9 @@ const upload = multer({
   }
 });
 
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) {
-    console.log(`[${new Date().toISOString()}] 🚫 Unauthorized access attempt - IP: ${req.ip}, Path: ${req.path}`);
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-};
-
 // ==================== 认证路由 ====================
+// 认证中间件 (requireAuth / requireAdmin / requireSession) 由 ./auth.js 提供
+// requireAuth 会查 users 表（30s 缓存）拦截 disabled / pending / 软删用户
 
 app.get('/api/auth/github', async (req, res) => {
   console.log(`[${new Date().toISOString()}] 🔐 GitHub OAuth initiated - IP: ${req.ip}`);
@@ -737,18 +780,73 @@ app.get('/api/auth/github/callback', async (req, res) => {
     if (rows.length > 0) {
       userId = rows[0].id;
       console.log(`[${new Date().toISOString()}] 🔄 Updating existing user ${userId}`);
+      if (rows[0].deleted_at) {
+        console.warn(`[${new Date().toISOString()}] 🚫 Login blocked - user soft-deleted: ${userId}`);
+        return redirectWithError(res, 'account_deleted');
+      }
+      if (rows[0].status === 'disabled') {
+        console.warn(`[${new Date().toISOString()}] 🚫 Login blocked - user disabled: ${userId}`);
+        return redirectWithError(res, 'disabled');
+      }
       await db.query(
-        'UPDATE users SET username = ?, avatar_url = ?, email = ?, updated_at = NOW() WHERE id = ?',
+        'UPDATE users SET username = ?, avatar_url = ?, email = ?, last_login_at = NOW(), updated_at = NOW() WHERE id = ?',
         [githubUser.login, githubUser.avatar_url, githubUser.email, userId]
       );
+      invalidateUserCache(userId);
     } else {
-      console.log(`[${new Date().toISOString()}] ➕ Creating new user`);
+      // M5：按 registration_mode 决定新用户创建策略
+      const registrationMode = (await getSystemConfig('registration_mode')) || 'open';
+      let initialStatus = 'active';
+
+      if (registrationMode === 'allowlist') {
+        const username = String(githubUser.login || '').toLowerCase();
+        const [allowRows] = await db.query(
+          'SELECT id FROM registration_allowlist WHERE github_username = ?',
+          [username]
+        );
+        if (!allowRows.length) {
+          console.warn(`[${new Date().toISOString()}] 🚫 Registration blocked - not in allowlist: ${username}`);
+          return redirectWithError(res, 'not_allowed');
+        }
+        initialStatus = 'active';
+      } else if (registrationMode === 'review') {
+        initialStatus = 'pending';
+      }
+
+      console.log(`[${new Date().toISOString()}] ➕ Creating new user (mode=${registrationMode}, status=${initialStatus})`);
       const [result] = await db.query(
-        'INSERT INTO users (github_id, username, avatar_url, email) VALUES (?, ?, ?, ?)',
-        [githubUser.id.toString(), githubUser.login, githubUser.avatar_url, githubUser.email]
+        'INSERT INTO users (github_id, username, avatar_url, email, status, last_login_at) VALUES (?, ?, ?, ?, ?, NOW())',
+        [githubUser.id.toString(), githubUser.login, githubUser.avatar_url, githubUser.email, initialStatus]
       );
       userId = result.insertId;
       console.log(`[${new Date().toISOString()}] ✅ New user created with ID ${userId}`);
+
+      // M5：注入默认 Profile（如配置）
+      try {
+        const defaultProfile = await getSystemConfig('default_api_profile');
+        if (defaultProfile && typeof defaultProfile === 'object') {
+          const profileId = generateProfileId();
+          await db.query(
+            `INSERT INTO user_api_profiles (id, user_id, name, provider, base_url, api_key, model, timeout, api_format, extra_settings, is_default)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+            [
+              profileId,
+              userId,
+              String(defaultProfile.name || '默认').slice(0, 100),
+              String(defaultProfile.provider || 'openai'),
+              String(defaultProfile.base_url || ''),
+              String(defaultProfile.api_key || ''),
+              String(defaultProfile.model || ''),
+              Math.max(10, Math.min(3600, Number(defaultProfile.timeout) || 600)),
+              defaultProfile.api_format === 'imagen' ? 'imagen' : 'responses',
+              defaultProfile.extra && typeof defaultProfile.extra === 'object' ? JSON.stringify(defaultProfile.extra) : null,
+            ]
+          );
+          console.log(`[${new Date().toISOString()}] 🎁 Injected default profile for new user ${userId}`);
+        }
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] ⚠️  Failed to inject default profile: ${err.message}`);
+      }
     }
 
     await new Promise((resolve, reject) => {
@@ -773,11 +871,22 @@ app.get('/api/auth/github/callback', async (req, res) => {
   }
 });
 
-app.get('/api/auth/me', requireAuth, async (req, res) => {
+app.use('/api/admin', createAdminRouter(db, { sessionStore: sessionStoreInstance, generateProfileId }));
+
+app.get('/api/quota', requireAuth, async (req, res) => {
   try {
-    console.log(`[${new Date().toISOString()}] 👤 Get current user - User ID: ${req.session.userId}`);
+    const summary = await getQuotaSummary(req.session.userId);
+    res.json(summary);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Quota summary error:`, error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/auth/me', requireSession, async (req, res) => {
+  try {
     const [rows] = await db.query(
-      'SELECT id, github_id, username, avatar_url, email, created_at FROM users WHERE id = ?',
+      'SELECT id, github_id, username, avatar_url, email, role, status, last_login_at, created_at FROM users WHERE id = ? AND deleted_at IS NULL',
       [req.session.userId]
     );
 
@@ -1278,6 +1387,33 @@ app.delete('/api/custom-providers/:id', requireAuth, async (req, res) => {
 });
 
 // ==================== 任务路由 ====================
+// admin 跨用户直通：任意写/读操作允许 admin 操作其他用户的资源
+// helper：返回 { ownerId, isAdminAccess } 或 null
+async function assertTaskAccess(taskId, req) {
+  const [rows] = await db.query(
+    'SELECT user_id FROM tasks WHERE id = ? AND deleted_at IS NULL',
+    [taskId]
+  );
+  if (!rows.length) return null;
+  const ownerId = Number(rows[0].user_id);
+  const isOwner = ownerId === Number(req.user.id);
+  const isAdmin = req.user.role === 'admin';
+  if (!isOwner && !isAdmin) return null;
+  return { ownerId, isAdminAccess: !isOwner && isAdmin };
+}
+
+async function assertImageAccess(imageId, req) {
+  const [rows] = await db.query(
+    'SELECT user_id FROM images WHERE id = ? AND deleted_at IS NULL',
+    [imageId]
+  );
+  if (!rows.length) return null;
+  const ownerId = Number(rows[0].user_id);
+  const isOwner = ownerId === Number(req.user.id);
+  const isAdmin = req.user.role === 'admin';
+  if (!isOwner && !isAdmin) return null;
+  return { ownerId, isAdminAccess: !isOwner && isAdmin };
+}
 
 app.get('/api/tasks', requireAuth, async (req, res) => {
   try {
@@ -1287,6 +1423,17 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const status = ['running', 'done', 'error'].includes(req.query.status) ? req.query.status : 'all';
     const onlyFavorite = req.query.favorite === '1' || req.query.favorite === 'true';
+
+    // admin 可以通过 ?userId= 查别人的任务
+    let targetUserId = Number(req.session.userId);
+    if (req.query.userId !== undefined) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const parsed = Number(req.query.userId);
+      if (!Number.isFinite(parsed)) return res.status(400).json({ error: 'Invalid userId' });
+      targetUserId = parsed;
+    }
 
     let cursorTs = null;
     let cursorId = null;
@@ -1302,10 +1449,10 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       }
     }
 
-    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
+    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, target=${targetUserId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
 
     const where = ['user_id = ?', 'deleted_at IS NULL'];
-    const params = [req.session.userId];
+    const params = [targetUserId];
     if (status !== 'all') {
       where.push('status = ?');
       params.push(status);
@@ -1419,14 +1566,28 @@ app.put('/api/tasks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, error_message, output_image_ids, finished_at } = req.body;
-    console.log(`[${new Date().toISOString()}] 🔄 Update task - Task ID: ${id}, Status: ${status}, Images: ${output_image_ids?.length || 0}`);
+
+    const access = await assertTaskAccess(id, req);
+    if (!access) return res.status(404).json({ error: 'Task not found' });
 
     await db.query(
-      'UPDATE tasks SET status = ?, error_message = ?, output_image_ids = ?, finished_at = ? WHERE id = ? AND user_id = ?',
-      [status, error_message, JSON.stringify(output_image_ids || []), finished_at, id, req.session.userId]
+      'UPDATE tasks SET status = ?, error_message = ?, output_image_ids = ?, finished_at = ? WHERE id = ?',
+      [status, error_message, JSON.stringify(output_image_ids || []), finished_at, id]
     );
 
-    console.log(`[${new Date().toISOString()}] ✅ Task updated - Task ID: ${id}`);
+    if (access.isAdminAccess) {
+      logAudit({
+        actorId: req.user.id,
+        action: 'task.update_other_user',
+        targetType: 'task',
+        targetId: id,
+        beforeValue: { owner_id: access.ownerId },
+        afterValue: { status, error_message: error_message ? '...' : null, finished_at },
+        ip: req.ip,
+        ua: req.get('user-agent'),
+      });
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Update task error:`, error.message);
@@ -1438,15 +1599,26 @@ app.put('/api/tasks/:id/favorite', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const next = req.body && req.body.isFavorite ? 1 : 0;
-    console.log(`[${new Date().toISOString()}] ⭐ Toggle favorite - Task ID: ${id}, isFavorite: ${next}`);
 
-    const [result] = await db.query(
-      'UPDATE tasks SET is_favorite = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [next, id, req.session.userId]
+    const access = await assertTaskAccess(id, req);
+    if (!access) return res.status(404).json({ error: 'Task not found' });
+
+    await db.query(
+      'UPDATE tasks SET is_favorite = ? WHERE id = ? AND deleted_at IS NULL',
+      [next, id]
     );
 
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: 'Task not found' });
+    if (access.isAdminAccess) {
+      logAudit({
+        actorId: req.user.id,
+        action: 'task.update_other_user',
+        targetType: 'task',
+        targetId: id,
+        beforeValue: { owner_id: access.ownerId },
+        afterValue: { is_favorite: !!next },
+        ip: req.ip,
+        ua: req.get('user-agent'),
+      });
     }
 
     res.json({ success: true, isFavorite: Boolean(next) });
@@ -1463,12 +1635,17 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
       : [];
     if (!ids.length) return res.status(400).json({ error: 'taskIds is required' });
 
-    console.log(`[${new Date().toISOString()}] 🗑️  Batch delete - User ID: ${req.session.userId}, count=${ids.length}`);
+    const isAdmin = req.user.role === 'admin';
+    console.log(`[${new Date().toISOString()}] 🗑️  Batch delete - User ID: ${req.session.userId}, count=${ids.length}, admin=${isAdmin}`);
 
-    // 先取出待删任务关联的图片 ID
+    // 普通用户只能删自己的；admin 可以删任意用户的（按 ids 命中）
+    const taskWhereSql = isAdmin
+      ? 'id IN (?) AND deleted_at IS NULL'
+      : 'id IN (?) AND user_id = ? AND deleted_at IS NULL';
+    const taskWhereParams = isAdmin ? [ids] : [ids, req.session.userId];
     const [taskRows] = await db.query(
-      'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-      [ids, req.session.userId]
+      `SELECT id, user_id, input_image_ids, output_image_ids FROM tasks WHERE ${taskWhereSql}`,
+      taskWhereParams
     );
 
     if (!taskRows.length) {
@@ -1476,6 +1653,7 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
     }
 
     const targetIds = taskRows.map((t) => t.id);
+    const ownerIds = new Set(taskRows.map((t) => Number(t.user_id)));
     const targetImageIds = new Set();
     for (const t of taskRows) {
       const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
@@ -1484,36 +1662,58 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
       for (const id of (oi || [])) targetImageIds.add(id);
     }
 
-    // 软删任务
     await db.query(
-      'UPDATE tasks SET deleted_at = NOW() WHERE id IN (?) AND user_id = ?',
-      [targetIds, req.session.userId]
+      `UPDATE tasks SET deleted_at = NOW() WHERE id IN (?)`,
+      [targetIds]
     );
 
-    // 清理孤立图片
     if (targetImageIds.size > 0) {
-      const [otherTasks] = await db.query(
-        'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
-        [req.session.userId]
-      );
-      const stillReferenced = new Set();
-      for (const t of otherTasks) {
-        const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
-        const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
-        for (const imgId of (ii || [])) stillReferenced.add(imgId);
-        for (const imgId of (oi || [])) stillReferenced.add(imgId);
-      }
-      const orphans = Array.from(targetImageIds).filter((imgId) => !stillReferenced.has(imgId));
-      if (orphans.length > 0) {
-        const [imgResult] = await db.query(
-          'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-          [orphans, req.session.userId]
+      // 各 owner 各自检查孤立图片
+      for (const ownerId of ownerIds) {
+        const [otherTasks] = await db.query(
+          'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
+          [ownerId]
         );
-        console.log(`[${new Date().toISOString()}] 🗑️  Soft-deleted ${imgResult.affectedRows} orphan images`);
+        const stillReferenced = new Set();
+        for (const t of otherTasks) {
+          const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
+          const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
+          for (const imgId of (ii || [])) stillReferenced.add(imgId);
+          for (const imgId of (oi || [])) stillReferenced.add(imgId);
+        }
+        const orphans = Array.from(targetImageIds).filter((imgId) => !stillReferenced.has(imgId));
+        if (orphans.length > 0) {
+          await db.query(
+            'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
+            [orphans, ownerId]
+          );
+        }
       }
     }
 
-    console.log(`[${new Date().toISOString()}] ✅ Batch deleted ${targetIds.length} tasks`);
+    // M8: admin 跨用户批量删除审计
+    const adminActorId = req.user.role === 'admin' ? req.user.id : null;
+    if (adminActorId) {
+      const otherTaskIds = taskRows
+        .filter((t) => Number(t.user_id) !== Number(req.user.id))
+        .map((t) => t.id);
+      if (otherTaskIds.length > 0) {
+        logAudit({
+          actorId: adminActorId,
+          action: 'task.batch_delete_other_user',
+          targetType: 'task',
+          targetId: null,
+          beforeValue: {
+            count: otherTaskIds.length,
+            task_ids: otherTaskIds,
+            owners: Array.from(ownerIds).filter((o) => o !== Number(req.user.id)),
+          },
+          ip: req.ip,
+          ua: req.get('user-agent'),
+        });
+      }
+    }
+
     res.json({ success: true, deletedCount: targetIds.length });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Batch delete error:`, error.message);
@@ -1524,20 +1724,21 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
 app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`[${new Date().toISOString()}] 🗑️  Delete task - Task ID: ${id}, User ID: ${req.session.userId}`);
 
-    // 先取出该任务关联的图片 ID
+    const access = await assertTaskAccess(id, req);
+    if (!access) return res.status(404).json({ error: 'Task not found' });
+    const { ownerId, isAdminAccess } = access;
+
     const [taskRows] = await db.query(
-      'SELECT input_image_ids, output_image_ids FROM tasks WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, req.session.userId]
+      'SELECT input_image_ids, output_image_ids FROM tasks WHERE id = ? AND deleted_at IS NULL',
+      [id]
     );
 
     await db.query(
-      'UPDATE tasks SET deleted_at = NOW() WHERE id = ? AND user_id = ?',
-      [id, req.session.userId]
+      'UPDATE tasks SET deleted_at = NOW() WHERE id = ?',
+      [id]
     );
 
-    // 联动软删除该任务关联的图片（若没有被其他存活任务引用）
     if (taskRows.length > 0) {
       const task = taskRows[0];
       const inputIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : (task.input_image_ids || []);
@@ -1545,10 +1746,9 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
       const allImageIds = [...new Set([...(inputIds || []), ...(outputIds || [])])];
 
       if (allImageIds.length > 0) {
-        // 找出当前用户其他存活任务仍在引用的图片 ID
         const [otherTasks] = await db.query(
           'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
-          [req.session.userId]
+          [ownerId]
         );
 
         const stillReferenced = new Set();
@@ -1561,16 +1761,27 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
 
         const orphanIds = allImageIds.filter(imgId => !stillReferenced.has(imgId));
         if (orphanIds.length > 0) {
-          const [imgResult] = await db.query(
+          await db.query(
             'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-            [orphanIds, req.session.userId]
+            [orphanIds, ownerId]
           );
-          console.log(`[${new Date().toISOString()}] 🗑️  Soft-deleted ${imgResult.affectedRows} associated images`);
         }
       }
     }
 
-    console.log(`[${new Date().toISOString()}] ✅ Task deleted - Task ID: ${id}`);
+    // M8: 跨用户任务删除审计
+    if (isAdminAccess) {
+      logAudit({
+        actorId: req.user.id,
+        action: 'task.delete_other_user',
+        targetType: 'task',
+        targetId: id,
+        beforeValue: { owner_id: ownerId },
+        ip: req.ip,
+        ua: req.get('user-agent'),
+      });
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Delete task error:`, error.message);
@@ -1602,6 +1813,17 @@ app.post('/api/generate', requireAuth, async (req, res) => {
   const taskId = req.body.taskId ? String(req.body.taskId) : null;
   console.log(`[${new Date().toISOString()}] 🎨 Generate request started - User: ${req.session.userId}, Task: ${taskId || 'none'}, Prompt: "${req.body.prompt?.substring(0, 50)}...", Input image IDs: ${req.body.inputImageIds?.length || 0}`);
 
+  // M7: 配额校验
+  const dailyCheck = await checkDailyGenerationQuota(req.session.userId);
+  if (!dailyCheck.ok) {
+    return res.status(429).json({ error: dailyCheck.message, code: dailyCheck.code });
+  }
+  // 存储配额预检：已超额直接拒绝（增量未知，仅用 0 做"是否已超"判断）
+  const storagePrecheck = await checkStorageQuota(req.session.userId, 0);
+  if (!storagePrecheck.ok) {
+    return res.status(429).json({ error: storagePrecheck.message, code: storagePrecheck.code });
+  }
+
   const callContext = {};
   try {
     const result = await callUpstreamImageApi(req.session.userId, req.body, callContext);
@@ -1622,6 +1844,19 @@ app.post('/api/generate', requireAuth, async (req, res) => {
 
     if (!saved.length) {
       throw new Error('上游返回的图片均无法解析');
+    }
+
+    // 存储配额事后兜底：本次生成把用户推过上限就回滚刚落盘的图片
+    const storagePostCheck = await checkStorageQuota(req.session.userId, 0);
+    if (!storagePostCheck.ok) {
+      const justSavedIds = saved.map((s) => s.id).filter(Boolean);
+      if (justSavedIds.length > 0) {
+        await db.query(
+          'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ?',
+          [justSavedIds, req.session.userId]
+        ).catch(() => {});
+      }
+      return res.status(429).json({ error: storagePostCheck.message, code: storagePostCheck.code });
     }
 
     // 服务端直接接管 task 状态更新，避免依赖前端回调（前端断网时 task 仍能落 done）
@@ -1751,6 +1986,13 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    // M7: 存储配额校验
+    const storageCheck = await checkStorageQuota(req.session.userId, req.file.size || 0);
+    if (!storageCheck.ok) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(429).json({ error: storageCheck.message, code: storageCheck.code });
+    }
+
     const fileBuffer = await fs.readFile(req.file.path);
     // 与客户端 hashDataUrl 和 /api/images/save 保持一致：sha256(dataUrl 字符串)
     const ext = (path.extname(req.file.originalname).slice(1) || 'png').toLowerCase();
@@ -1792,22 +2034,25 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
 app.post('/api/images/save', requireAuth, async (req, res) => {
   try {
     const { dataUrl, source = 'generated' } = req.body;
-    console.log(`[${new Date().toISOString()}] 💾 Save image - User ID: ${req.session.userId}, Source: ${source}`);
 
     if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-      console.error(`[${new Date().toISOString()}] ❌ Invalid data URL`);
       return res.status(400).json({ error: 'Invalid data URL' });
     }
 
     const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
     if (!matches) {
-      console.error(`[${new Date().toISOString()}] ❌ Invalid data URL format`);
       return res.status(400).json({ error: 'Invalid data URL format' });
+    }
+
+    const buffer = Buffer.from(matches[2], 'base64');
+    const storageCheck = await checkStorageQuota(req.session.userId, buffer.length);
+    if (!storageCheck.ok) {
+      return res.status(429).json({ error: storageCheck.message, code: storageCheck.code });
     }
 
     const result = await saveGeneratedImageBytes({
       userId: req.session.userId,
-      buffer: Buffer.from(matches[2], 'base64'),
+      buffer,
       mime: matches[1],
       source,
     });
@@ -1822,9 +2067,12 @@ app.get('/api/images/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
+    const access = await assertImageAccess(id, req);
+    if (!access) return res.status(404).json({ error: 'Image not found' });
+
     const [rows] = await db.query(
-      'SELECT id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, req.session.userId]
+      'SELECT id, user_id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ? AND deleted_at IS NULL',
+      [id]
     );
 
     if (rows.length === 0) {
@@ -1834,6 +2082,36 @@ app.get('/api/images/:id', requireAuth, async (req, res) => {
     res.json(rows[0]);
   } catch (error) {
     console.error('Get image error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/images/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const access = await assertImageAccess(id, req);
+    if (!access) return res.status(404).json({ error: 'Image not found' });
+
+    await db.query(
+      'UPDATE images SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+
+    if (access.isAdminAccess) {
+      logAudit({
+        actorId: req.user.id,
+        action: 'image.delete_other_user',
+        targetType: 'image',
+        targetId: id,
+        beforeValue: { owner_id: access.ownerId },
+        ip: req.ip,
+        ua: req.get('user-agent'),
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete image error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -10,7 +10,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (user) {
+    if (user && user.status === 'active') {
       navigate('/', { replace: true })
     }
   }, [user, navigate])
@@ -23,12 +23,18 @@ export default function LoginPage() {
       setError('登录状态已失效，请重新发起 GitHub 登录')
     } else if (err === 'auth_failed') {
       setError('GitHub 登录失败，请重试')
+    } else if (err === 'disabled') {
+      setError('该账号已被禁用，请联系管理员')
+    } else if (err === 'not_allowed') {
+      setError('该 GitHub 账号不在注册白名单内')
+    } else if (err === 'account_deleted') {
+      setError('该账号已被删除')
     } else if (err) {
       setError('登录出错，请重试')
     }
   }, [searchParams])
 
-  if (user) return null
+  if (user && user.status === 'active') return null
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 px-4">

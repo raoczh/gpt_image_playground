@@ -33,12 +33,66 @@ async function initDatabase() {
         avatar_url VARCHAR(500) COMMENT 'GitHub 头像 URL',
         email VARCHAR(255) COMMENT '邮箱',
         access_token VARCHAR(255) COMMENT 'GitHub Access Token',
+        role VARCHAR(16) NOT NULL DEFAULT 'user' COMMENT '角色: user / admin',
+        status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '状态: active / disabled / pending',
+        last_login_at DATETIME NULL COMMENT '最后登录时间',
+        quota_overrides JSON NULL COMMENT '配额覆写 (M7)',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）',
         INDEX idx_github_id (github_id),
-        INDEX idx_username (username)
+        INDEX idx_username (username),
+        INDEX idx_role (role),
+        INDEX idx_status (status),
+        INDEX idx_user_deleted_at (deleted_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表'
     `);
+
+    // 检查并添加 users 表的 admin 相关字段（M1 + M7 配额覆写）
+    // 每列独立检查，避免之前部分迁移（比如只加了 role）导致剩余字段漏迁
+    const dbName = process.env.DB_NAME || 'gpt-image';
+    const [existingUserCols] = await connection.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'`,
+      [dbName]
+    );
+    const userColSet = new Set(existingUserCols.map((r) => r.COLUMN_NAME));
+
+    const userColumnsToAdd = [
+      ['role', `ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user' COMMENT '角色: user / admin' AFTER access_token`],
+      ['status', `ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '状态: active / disabled / pending' AFTER role`],
+      ['last_login_at', `ADD COLUMN last_login_at DATETIME NULL COMMENT '最后登录时间' AFTER status`],
+      ['quota_overrides', `ADD COLUMN quota_overrides JSON NULL COMMENT '配额覆写 (M7)' AFTER last_login_at`],
+      ['deleted_at', `ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER updated_at`],
+    ];
+    const missingCols = userColumnsToAdd.filter(([name]) => !userColSet.has(name));
+    if (missingCols.length > 0) {
+      console.log(`  📝 Adding missing admin columns to users table: ${missingCols.map(([n]) => n).join(', ')}`);
+      await connection.query(`ALTER TABLE users ${missingCols.map(([, ddl]) => ddl).join(', ')}`);
+      for (const [name] of missingCols) userColSet.add(name);
+    }
+
+    // 索引同样独立检查
+    const [existingUserIdx] = await connection.query(
+      `SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'`,
+      [dbName]
+    );
+    const userIdxSet = new Set(existingUserIdx.map((r) => r.INDEX_NAME));
+    const userIndexesToAdd = [
+      ['idx_role', 'role'],
+      ['idx_status', 'status'],
+      ['idx_user_deleted_at', 'deleted_at'],
+    ];
+    for (const [idxName, col] of userIndexesToAdd) {
+      if (userIdxSet.has(idxName) || !userColSet.has(col)) continue;
+      try {
+        await connection.query(`ALTER TABLE users ADD INDEX ${idxName} (${col})`);
+        console.log(`  ✅ Added index ${idxName} on users(${col})`);
+      } catch (err) {
+        console.warn(`  ⚠️  Failed to add index ${idxName}: ${err.message}`);
+      }
+    }
 
     // 创建任务记录表
     await connection.query(`
@@ -240,6 +294,66 @@ async function initDatabase() {
         INDEX idx_user_id (user_id),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户自定义 HTTP Provider'
+    `);
+
+    // 系统配置表（M4 + M5）
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS system_config (
+        config_key VARCHAR(64) PRIMARY KEY COMMENT '配置 key',
+        config_value JSON NOT NULL COMMENT '配置值',
+        updated_by INT NULL COMMENT '最后更新者',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统配置'
+    `);
+
+    // 默认配置（仅当不存在时插入）
+    const defaultConfigs = [
+      ['registration_mode', JSON.stringify('open')],
+      ['daily_generation_limit', JSON.stringify(null)],
+      ['user_storage_limit_mb', JSON.stringify(null)],
+      ['maintenance_mode', JSON.stringify(false)],
+      ['maintenance_message', JSON.stringify('系统维护中，请稍后再试')],
+      ['announcement', JSON.stringify(null)],
+      ['default_api_profile', JSON.stringify(null)],
+      ['review_message', JSON.stringify('您的账号正在等待管理员审核，请耐心等待。')],
+    ];
+    for (const [k, v] of defaultConfigs) {
+      await connection.query(
+        'INSERT IGNORE INTO system_config (config_key, config_value) VALUES (?, CAST(? AS JSON))',
+        [k, v]
+      );
+    }
+
+    // 注册白名单表（M5）
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS registration_allowlist (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        github_username VARCHAR(64) NOT NULL UNIQUE COMMENT 'GitHub 用户名（小写比较）',
+        added_by INT NULL COMMENT '添加者',
+        note VARCHAR(255) NULL COMMENT '备注',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_username (github_username)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='注册白名单'
+    `);
+
+    // 审计日志表（M8）
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS admin_audit_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        actor_id INT NOT NULL COMMENT '操作者 user_id',
+        action VARCHAR(64) NOT NULL COMMENT '动作',
+        target_type VARCHAR(32) NULL COMMENT '目标类型',
+        target_id VARCHAR(64) NULL COMMENT '目标 ID',
+        before_value JSON NULL COMMENT '变更前',
+        after_value JSON NULL COMMENT '变更后',
+        ip VARCHAR(64) NULL,
+        ua VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_actor (actor_id),
+        INDEX idx_target (target_type, target_id),
+        INDEX idx_action (action),
+        INDEX idx_created (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='管理员审计日志'
     `);
 
     console.log('✅ Database tables initialized successfully');

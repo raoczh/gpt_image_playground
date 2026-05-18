@@ -25,6 +25,11 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
 
   const response = await fetch(withNoCacheQuery(url, method), { ...defaultOptions, ...options, method });
 
+  if (response.status === 503 && typeof window !== 'undefined' && window.location.pathname !== '/maintenance') {
+    window.location.href = '/maintenance';
+    throw new Error('maintenance');
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(error.error || `HTTP ${response.status}`);
@@ -41,6 +46,9 @@ export interface User {
   username: string;
   avatar_url: string;
   email: string;
+  role: 'user' | 'admin';
+  status: 'active' | 'pending' | 'disabled';
+  last_login_at: string | null;
   created_at: string;
 }
 
@@ -147,6 +155,7 @@ export interface GetTasksOpts {
   q?: string;
   status?: 'all' | 'running' | 'done' | 'error';
   favorite?: boolean;
+  userId?: number;
 }
 
 export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
@@ -156,6 +165,7 @@ export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
   if (opts.q) params.set('q', opts.q);
   if (opts.status && opts.status !== 'all') params.set('status', opts.status);
   if (opts.favorite) params.set('favorite', '1');
+  if (opts.userId) params.set('userId', String(opts.userId));
   const query = params.toString();
   return apiRequest(query ? `/api/tasks?${query}` : '/api/tasks');
 }
@@ -340,6 +350,11 @@ export async function uploadImage(file: File): Promise<{ id: string; url: string
     body: formData,
   });
 
+  if (response.status === 503 && typeof window !== 'undefined' && window.location.pathname !== '/maintenance') {
+    window.location.href = '/maintenance';
+    throw new Error('maintenance');
+  }
+
   if (!response.ok) {
     throw new Error('Upload failed');
   }
@@ -359,4 +374,15 @@ export async function saveImage(
 
 export async function getImage(id: string): Promise<Image> {
   return apiRequest(`/api/images/${id}`);
+}
+
+// ==================== 配额（M7） ====================
+
+export interface QuotaSummary {
+  daily: { limit: number | null; used: number };
+  storage: { limit_bytes: number | null; limit_mb: number | null; used_bytes: number };
+}
+
+export async function getQuota(): Promise<QuotaSummary> {
+  return apiRequest('/api/quota');
 }

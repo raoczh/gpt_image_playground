@@ -1,4 +1,4 @@
 编译：
-docker buildx build --platform linux/amd64 --build-arg VITE_API_BASE_URL=https://api.gpt-image.raoczh.xyz -t raoczh/gpt-image:custom-20260513-04 --load .
+docker buildx build --platform linux/amd64 --build-arg VITE_API_BASE_URL=https://api.gpt-image.raoczh.xyz -t raoczh/gpt-image:custom-20260517-01 --load .
 推送：
-docker push raoczh/gpt-image:custom-20260513-04
+docker push raoczh/gpt-image:custom-20260517-01

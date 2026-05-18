@@ -8,10 +8,18 @@ CREATE TABLE IF NOT EXISTS `users` (
   `avatar_url` VARCHAR(500) COMMENT 'GitHub 头像 URL',
   `email` VARCHAR(255) COMMENT '邮箱',
   `access_token` VARCHAR(255) COMMENT 'GitHub Access Token (加密存储)',
+  `role` VARCHAR(16) NOT NULL DEFAULT 'user' COMMENT '角色: user / admin',
+  `status` VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '状态: active / disabled / pending',
+  `last_login_at` DATETIME NULL COMMENT '最后登录时间',
+  `quota_overrides` JSON NULL COMMENT '配额覆写 (M7)',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）',
   INDEX `idx_github_id` (`github_id`),
-  INDEX `idx_username` (`username`)
+  INDEX `idx_username` (`username`),
+  INDEX `idx_role` (`role`),
+  INDEX `idx_status` (`status`),
+  INDEX `idx_user_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
 -- 任务记录表

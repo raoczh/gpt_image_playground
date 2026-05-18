@@ -22,7 +22,8 @@
       "Bash(git commit *)",
       "Bash(git diff *)",
       "Bash(git checkout *)",
-      "Bash(node -c *)"
+      "Bash(node -c *)",
+      "Bash(node --check *)"
     ]
   }
 }

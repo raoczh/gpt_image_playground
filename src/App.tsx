@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { initStore, loadProfiles } from './store'
 import { useStore } from './store'
@@ -18,25 +18,37 @@ import Toast from './components/Toast'
 import ImageContextMenu from './components/ImageContextMenu'
 import MaskEditorModal from './components/MaskEditorModal'
 import LoginPage from './pages/LoginPage'
+import PendingPage from './pages/PendingPage'
+import MaintenancePage from './pages/MaintenancePage'
+import StatusGuard from './components/StatusGuard'
+import AnnouncementBanner from './components/AnnouncementBanner'
+import AdminGuard from './components/AdminGuard'
+
+const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'))
+const StatsPage = lazy(() => import('./pages/admin/StatsPage'))
+const UsersPage = lazy(() => import('./pages/admin/UsersPage'))
+const UserTasksPage = lazy(() => import('./pages/admin/UserTasksPage'))
+const AllowlistPage = lazy(() => import('./pages/admin/AllowlistPage'))
+const AuditLogPage = lazy(() => import('./pages/admin/AuditLogPage'))
+const ConfigPage = lazy(() => import('./pages/admin/ConfigPage'))
+
+function AuthLoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+      <svg className="animate-spin h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      </svg>
+    </div>
+  )
+}
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const user = useStore((s) => s.user)
   const authLoading = useStore((s) => s.authLoading)
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <svg className="animate-spin h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
+  if (authLoading) return <AuthLoadingFallback />
+  if (!user) return <Navigate to="/login" replace />
 
   return <>{children}</>
 }
@@ -107,6 +119,7 @@ function MainApp() {
 
   return (
     <>
+      <AnnouncementBanner />
       <Header />
       <main data-home-main className="safe-area-x max-w-7xl mx-auto pb-48">
         <SearchBar />
@@ -153,14 +166,49 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="*"
-        element={
-          <AuthGuard>
-            <MainApp />
-          </AuthGuard>
-        }
-      />
+      <Route path="/maintenance" element={<MaintenancePage />} />
+      <Route element={<StatusGuard />}>
+        <Route
+          path="/pending"
+          element={
+            <AuthGuard>
+              <PendingPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <AuthGuard>
+              <AdminGuard />
+            </AuthGuard>
+          }
+        >
+          <Route
+            element={
+              <Suspense fallback={<AuthLoadingFallback />}>
+                <AdminLayout />
+              </Suspense>
+            }
+          >
+            <Route index element={<Navigate to="stats" replace />} />
+            <Route path="stats" element={<StatsPage />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="users/:id/tasks" element={<UserTasksPage />} />
+            <Route path="allowlist" element={<AllowlistPage />} />
+            <Route path="audit" element={<AuditLogPage />} />
+            <Route path="config" element={<ConfigPage />} />
+          </Route>
+        </Route>
+        <Route
+          path="*"
+          element={
+            <AuthGuard>
+              <MainApp />
+            </AuthGuard>
+          }
+        />
+      </Route>
     </Routes>
   )
 }

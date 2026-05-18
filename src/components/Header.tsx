@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { redirectToGitHubLogin, logout } from '../lib/backendApi'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import HelpModal from './HelpModal'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -20,6 +21,7 @@ export default function Header() {
   const setUser = useStore((s) => s.setUser)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const showToast = useStore((s) => s.showToast)
+  const navigate = useNavigate()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
@@ -138,8 +140,13 @@ export default function Header() {
                   />
                   <div className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-white/[0.08] dark:bg-gray-900 z-50">
                     <div className="p-3 border-b border-gray-200 dark:border-white/[0.08]">
-                      <div className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                      <div className="text-sm font-medium text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
                         {user.username}
+                        {user.role === 'admin' && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+                            admin
+                          </span>
+                        )}
                       </div>
                       {user.email && (
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
@@ -147,6 +154,17 @@ export default function Header() {
                         </div>
                       )}
                     </div>
+                    {user.role === 'admin' && (
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          navigate('/admin')
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors border-b border-gray-200 dark:border-white/[0.08]"
+                      >
+                        管理后台
+                      </button>
+                    )}
                     <button
                       onClick={handleLogout}
                       className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 transition-colors rounded-b-xl"

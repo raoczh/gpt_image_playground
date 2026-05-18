@@ -221,6 +221,63 @@ docker compose up -d
 
 ---
 
+## 🛡️ 管理员功能
+
+本分支自带完整的管理员后台（M1–M8 全量实装），覆盖用户管理、注册控制、配额、维护模式、仪表盘、审计日志。
+
+### 提升管理员
+
+部署后，用 SQL 把任意已注册用户提升为管理员（不需要重启）：
+
+```sql
+UPDATE users SET role='admin' WHERE github_id='你的 GitHub 数字 ID';
+-- 或按用户名
+UPDATE users SET role='admin' WHERE username='your-github-login';
+```
+
+最多 30 秒后（用户缓存 TTL）生效。登录后 Header 头像菜单会出现「管理后台」入口，路径 `/admin`。
+
+### 后台模块
+
+| 模块 | 路径 | 用途 |
+|---|---|---|
+| 仪表盘 | `/admin/stats` | 用户/任务/存储概览、任务趋势、Top 10 占用、最近失败任务 |
+| 用户管理 | `/admin/users` | 列表/搜索/筛选；启用/禁用、提升/降级、审核通过、强制下线、软删；点击进入用户详情抽屉可直接管控该用户的 settings / API Profiles / Custom Providers / 配额覆写 |
+| 用户任务 | `/admin/users/:id/tasks` | 复用 admin 直通能力，对任意用户的任务做 CRUD（删除会进审计） |
+| 注册白名单 | `/admin/allowlist` | 仅当注册模式为 allowlist 时生效 |
+| 系统配置 | `/admin/config` | 注册模式（open / allowlist / review）、维护模式、配额上限、公告横幅、新用户默认 Profile |
+| 审计日志 | `/admin/audit` | admin 写操作 + 跨用户内容操作的完整记录，可按动作 / 操作者 / 目标类型筛选 |
+
+### 注册控制
+
+`registration_mode` 三档（系统配置页可改）：
+
+- `open`（默认）—— 任何 GitHub 账号都能登录
+- `allowlist` —— 只有白名单内的 GitHub 用户名能注册（已注册用户不受影响）
+- `review` —— 新注册用户 `status=pending`，待 admin 审核通过才能使用
+
+### 配额
+
+支持全局配额 + 单用户覆写（`users.quota_overrides` JSON）：
+
+- `daily_generation_limit`：每日生成次数
+- `user_storage_limit_mb`：单用户存储空间 MB
+
+超限的请求返回 429 + 错误码 `QUOTA_DAILY_EXCEEDED` / `QUOTA_STORAGE_EXCEEDED`。普通用户在设置弹窗顶部能看到「我的额度」卡片。
+
+### 维护模式
+
+开启后所有非 admin 用户访问 `/api/*` 业务接口返回 503，admin 不受影响。前端会展示维护提示页（`/maintenance`）。
+
+### 安全说明
+
+- `requireAuth` 中间件在 session 校验之上加了 status 拦截：`disabled` 用户立即销毁 session，`pending` 用户被拦在业务接口外（仅放行 `/api/auth/*` 和 `/api/auth/me`）
+- 用户角色/状态有 30 秒内存缓存，admin 改完最多 30 秒生效；改 status / 软删用户时主动清缓存 + 销毁该用户全部 session
+- admin 不能把自己降级、禁用、删除（后端硬拦截）
+- admin 跨用户操作 task / image 自动记 `admin_audit_log`（自己的内容操作不记录，避免噪音）
+
+---
+
 ## 💻 技术栈
 
 - **框架**：[React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
