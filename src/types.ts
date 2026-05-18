@@ -136,6 +136,8 @@ export interface TaskRecord {
   apiProfileName?: string | null
   apiProvider?: string | null
   apiModel?: string | null
+  /** 任务操作人（admin 跨用户视图时使用） */
+  owner?: { id: number; username: string; avatar_url: string } | null
 }
 
 // ===== IndexedDB 存储的图片 =====

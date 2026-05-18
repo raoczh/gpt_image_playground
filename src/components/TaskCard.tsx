@@ -13,6 +13,7 @@ interface Props {
   selectionMode?: boolean
   selected?: boolean
   onToggleSelect?: () => void
+  showOwner?: boolean
 }
 
 export default function TaskCard({
@@ -24,6 +25,7 @@ export default function TaskCard({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  showOwner = false,
 }: Props) {
   const [thumbSrc, setThumbSrc] = useState<string>('')
   const [coverRatio, setCoverRatio] = useState<string>('')
@@ -191,6 +193,14 @@ export default function TaskCard({
                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
               />
             </svg>
+          )}
+          {showOwner && task.owner && (
+            <div className="absolute top-1.5 right-1.5 flex items-center gap-1 bg-black/55 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm max-w-[120px]" title={`操作人：${task.owner.username}`}>
+              {task.owner.avatar_url ? (
+                <img src={task.owner.avatar_url} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
+              ) : null}
+              <span className="truncate">{task.owner.username}</span>
+            </div>
           )}
           {/* 运行中显示耗时，完成后显示封面图比例与分辨率标签 */}
           <div className="absolute top-1.5 left-1.5 flex items-center gap-1">

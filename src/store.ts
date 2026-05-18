@@ -124,6 +124,12 @@ interface AppState {
   setFilterStatus: (status: AppState['filterStatus']) => void
   filterFavorite: boolean
   setFilterFavorite: (favorite: boolean) => void
+  /** admin 筛选用户：'self' = 自己（默认），'all' = 全部用户 */
+  filterUserScope: 'self' | 'all'
+  setFilterUserScope: (scope: AppState['filterUserScope']) => void
+  /** 主页任务列表显示样式：grid（默认）/ list */
+  viewMode: 'grid' | 'list'
+  setViewMode: (mode: AppState['viewMode']) => void
   toggleTaskFavorite: (taskId: string) => Promise<void>
   // 批量选择
   selectionMode: boolean
@@ -238,6 +244,10 @@ export const useStore = create<AppState>()(
   setFilterStatus: (filterStatus) => set({ filterStatus }),
   filterFavorite: false,
   setFilterFavorite: (filterFavorite) => set({ filterFavorite }),
+  filterUserScope: 'self',
+  setFilterUserScope: (filterUserScope) => set({ filterUserScope }),
+  viewMode: 'grid',
+  setViewMode: (viewMode) => set({ viewMode }),
   toggleTaskFavorite: async (taskId) => {
     const state = useStore.getState()
     const target = state.tasks.find((t) => t.id === taskId)
@@ -359,6 +369,7 @@ export const useStore = create<AppState>()(
       partialize: (s) => ({
         params: s.params,
         prompt: s.settings.persistInputOnRestart ? s.prompt : '',
+        viewMode: s.viewMode,
         settings: {
           ...DEFAULT_SETTINGS,
           enterSubmit: s.settings.enterSubmit,
@@ -537,6 +548,7 @@ function toTaskRecord(t: backendApi.Task): TaskRecord {
     apiProfileName: t.api_profile_name ?? null,
     apiProvider: t.api_provider ?? null,
     apiModel: t.api_model ?? null,
+    owner: t.owner ?? null,
   }
 }
 
@@ -545,15 +557,16 @@ let currentLoadSeq = 0
 
 /** 拉第一页任务（重置 cursor）。搜索 / 过滤变化时调。已运行中的任务会保留在最前面，避免刚提交的 task 被刷掉。 */
 export async function loadTasksFirstPage() {
-  const { user, searchQuery, filterStatus, filterFavorite } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite, filterUserScope } = useStore.getState()
   if (!user) {
     useStore.setState({ tasks: [], tasksCursor: null, tasksHasMore: false })
     return
   }
+  const userIdParam = user.role === 'admin' && filterUserScope === 'all' ? 'all' : undefined
   const mySeq = ++currentLoadSeq
   useStore.setState({ tasksLoading: true })
   try {
-    const page = await backendApi.getTasks({ q: searchQuery, status: filterStatus, favorite: filterFavorite })
+    const page = await backendApi.getTasks({ q: searchQuery, status: filterStatus, favorite: filterFavorite, userId: userIdParam })
     if (mySeq !== currentLoadSeq) return // 已被更新请求覆盖
     const items = page.items.map(toTaskRecord)
     const runningTasks = useStore.getState().tasks.filter((t) => t.status === 'running')
@@ -577,11 +590,12 @@ export async function loadTasksFirstPage() {
 
 /** 追加下一页。由滚动到底部触发，幂等。 */
 export async function loadMoreTasks() {
-  const { user, searchQuery, filterStatus, filterFavorite, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite, filterUserScope, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
   if (!user || tasksLoading || !tasksHasMore || !tasksCursor) return
+  const userIdParam = user.role === 'admin' && filterUserScope === 'all' ? 'all' : undefined
   useStore.setState({ tasksLoading: true })
   try {
-    const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus, favorite: filterFavorite })
+    const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus, favorite: filterFavorite, userId: userIdParam })
     const items = page.items.map(toTaskRecord)
     useStore.setState((s) => ({
       tasks: [...s.tasks, ...items.filter((t) => !s.tasks.find((x) => x.id === t.id))],

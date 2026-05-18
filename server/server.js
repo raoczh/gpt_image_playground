@@ -1424,15 +1424,20 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     const status = ['running', 'done', 'error'].includes(req.query.status) ? req.query.status : 'all';
     const onlyFavorite = req.query.favorite === '1' || req.query.favorite === 'true';
 
-    // admin 可以通过 ?userId= 查别人的任务
+    // admin 可以通过 ?userId= 查别人的任务，?userId=all 查全部用户
     let targetUserId = Number(req.session.userId);
+    let allUsers = false;
     if (req.query.userId !== undefined) {
       if (req.user.role !== 'admin') {
         return res.status(403).json({ error: 'Forbidden' });
       }
-      const parsed = Number(req.query.userId);
-      if (!Number.isFinite(parsed)) return res.status(400).json({ error: 'Invalid userId' });
-      targetUserId = parsed;
+      if (req.query.userId === 'all') {
+        allUsers = true;
+      } else {
+        const parsed = Number(req.query.userId);
+        if (!Number.isFinite(parsed)) return res.status(400).json({ error: 'Invalid userId' });
+        targetUserId = parsed;
+      }
     }
 
     let cursorTs = null;
@@ -1449,29 +1454,33 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       }
     }
 
-    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, target=${targetUserId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
+    console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, target=${allUsers ? 'all' : targetUserId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
 
-    const where = ['user_id = ?', 'deleted_at IS NULL'];
-    const params = [targetUserId];
+    const where = ['t.deleted_at IS NULL'];
+    const params = [];
+    if (!allUsers) {
+      where.push('t.user_id = ?');
+      params.push(targetUserId);
+    }
     if (status !== 'all') {
-      where.push('status = ?');
+      where.push('t.status = ?');
       params.push(status);
     }
     if (onlyFavorite) {
-      where.push('is_favorite = 1');
+      where.push('t.is_favorite = 1');
     }
     if (q) {
-      where.push('prompt LIKE ?');
+      where.push('t.prompt LIKE ?');
       params.push(`%${q}%`);
     }
     if (cursorTs && cursorId) {
-      // 严格小于上一页最后一条的 (created_at, id)
-      where.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      where.push('(t.created_at < ? OR (t.created_at = ? AND t.id < ?))');
       params.push(cursorTs, cursorTs, cursorId);
     }
 
-    // 多取 1 条用于判断是否还有下一页
-    const sql = `SELECT * FROM tasks WHERE ${where.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    const sql = `SELECT t.*, u.username AS owner_username, u.avatar_url AS owner_avatar_url
+                 FROM tasks t LEFT JOIN users u ON u.id = t.user_id
+                 WHERE ${where.join(' AND ')} ORDER BY t.created_at DESC, t.id DESC LIMIT ?`;
     const [rows] = await db.query(sql, [...params, limit + 1]);
 
     const hasMore = rows.length > limit;
@@ -1479,7 +1488,6 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
     console.log(`[${new Date().toISOString()}] 📊 Found ${pageRows.length} tasks (hasMore=${hasMore})`);
 
-    // 一次性收集所有任务引用的图片 ID（输入 + 输出），批量查询 URL
     const parsedRows = pageRows.map(task => {
       const inputImageIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids;
       const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
@@ -1492,17 +1500,23 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       for (const id of outputImageIds) allImageIds.add(id);
     }
 
+    // admin 跨用户查看时图片可能不属于当前 session，按图片自身 user_id 检索
     const imageMap = new Map();
     if (allImageIds.size > 0) {
+      const imageWhere = ['id IN (?)', 'deleted_at IS NULL'];
+      const imageParams = [Array.from(allImageIds)];
+      if (req.user.role !== 'admin') {
+        imageWhere.push('user_id = ?');
+        imageParams.push(req.session.userId);
+      }
       const [images] = await db.query(
-        'SELECT id, file_url, thumb_url FROM images WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-        [Array.from(allImageIds), req.session.userId]
+        `SELECT id, file_url, thumb_url FROM images WHERE ${imageWhere.join(' AND ')}`,
+        imageParams
       );
       for (const img of images) imageMap.set(img.id, { url: img.file_url, thumb: img.thumb_url || '' });
     }
 
     const items = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
-      // 保留占位（缺失填空串），保证与 ID 数组的索引一一对应
       const inputImageUrls = inputImageIds.map(id => imageMap.get(id)?.url || '');
       const outputImageUrls = outputImageIds.map(id => imageMap.get(id)?.url || '');
       const inputThumbUrls = inputImageIds.map(id => imageMap.get(id)?.thumb || '');
@@ -1516,8 +1530,9 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         return v;
       };
 
+      const { owner_username, owner_avatar_url, ...rest } = task;
       return {
-        ...task,
+        ...rest,
         params: typeof task.params === 'string' ? JSON.parse(task.params) : task.params,
         actual_params: parseJson(task.actual_params),
         revised_prompt_by_image: parseJson(task.revised_prompt_by_image),
@@ -1528,6 +1543,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         output_image_urls: outputImageUrls,
         input_thumb_urls: inputThumbUrls,
         output_thumb_urls: outputThumbUrls,
+        owner: { id: task.user_id, username: owner_username || '', avatar_url: owner_avatar_url || '' },
       };
     });
 

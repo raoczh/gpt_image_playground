@@ -8,9 +8,13 @@ export default function SearchBar() {
   const setFilterStatus = useStore((s) => s.setFilterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const setFilterFavorite = useStore((s) => s.setFilterFavorite)
+  const filterUserScope = useStore((s) => s.filterUserScope)
+  const setFilterUserScope = useStore((s) => s.setFilterUserScope)
+  const user = useStore((s) => s.user)
+  const isAdmin = user?.role === 'admin'
 
   return (
-    <div className="mt-6 mb-4 flex gap-3">
+    <div className="mt-6 mb-4 flex gap-3 flex-wrap">
       <div className="relative w-32 flex-shrink-0 z-20">
         <Select
           value={filterStatus}
@@ -24,6 +28,19 @@ export default function SearchBar() {
           className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
         />
       </div>
+      {isAdmin && (
+        <div className="relative w-32 flex-shrink-0 z-20">
+          <Select
+            value={filterUserScope}
+            onChange={(val) => setFilterUserScope(val as any)}
+            options={[
+              { label: '只看自己', value: 'self' },
+              { label: '全部用户', value: 'all' },
+            ]}
+            className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+          />
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setFilterFavorite(!filterFavorite)}

@@ -116,6 +116,12 @@ export async function updatePreferences(preferences: UserPreferences): Promise<{
 
 // ==================== 任务 API ====================
 
+export interface TaskOwner {
+  id: number;
+  username: string;
+  avatar_url: string;
+}
+
 export interface Task {
   id: string;
   user_id: number;
@@ -142,6 +148,7 @@ export interface Task {
   finished_at?: number;
   created_at: string;
   updated_at: string;
+  owner?: TaskOwner;
 }
 
 export interface TasksPage {
@@ -155,7 +162,7 @@ export interface GetTasksOpts {
   q?: string;
   status?: 'all' | 'running' | 'done' | 'error';
   favorite?: boolean;
-  userId?: number;
+  userId?: number | 'all';
 }
 
 export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
@@ -165,7 +172,7 @@ export async function getTasks(opts: GetTasksOpts = {}): Promise<TasksPage> {
   if (opts.q) params.set('q', opts.q);
   if (opts.status && opts.status !== 'all') params.set('status', opts.status);
   if (opts.favorite) params.set('favorite', '1');
-  if (opts.userId) params.set('userId', String(opts.userId));
+  if (opts.userId !== undefined && opts.userId !== null) params.set('userId', String(opts.userId));
   const query = params.toString();
   return apiRequest(query ? `/api/tasks?${query}` : '/api/tasks');
 }
