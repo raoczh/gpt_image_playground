@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useStore, reuseConfig, editOutputs, removeTask, loadTasksFirstPage, loadMoreTasks } from '../store'
+import { useStore, reuseConfig, editOutputs, removeTask, loadMoreTasks } from '../store'
 import TaskCard from './TaskCard'
 import TaskList from './TaskList'
 
@@ -9,7 +9,6 @@ export default function TaskGrid() {
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
-  const filterUserId = useStore((s) => s.filterUserId)
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
   const tasksLoading = useStore((s) => s.tasksLoading)
@@ -27,20 +26,6 @@ export default function TaskGrid() {
   const isAdmin = user?.role === 'admin'
   const showOwner = isAdmin
 
-  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite / filterUserId 变化时 debounce reload。
-  // 用 ref 跳过首次 effect 避免重复请求。
-  const skipFirstRef = useRef(true)
-  useEffect(() => {
-    if (!user) return
-    if (skipFirstRef.current) {
-      skipFirstRef.current = false
-      return
-    }
-    const handle = setTimeout(() => {
-      loadTasksFirstPage().catch(console.error)
-    }, 300)
-    return () => clearTimeout(handle)
-  }, [user, searchQuery, filterStatus, filterFavorite, filterUserId])
 
   // 滚动到底部时拉下一页
   const sentinelRef = useRef<HTMLDivElement | null>(null)

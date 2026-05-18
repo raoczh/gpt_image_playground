@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useStore } from '../store'
+import { useStore, loadTasksFirstPage } from '../store'
 import Select from './Select'
 import { listUsers } from '../lib/adminApi'
 
@@ -15,7 +15,12 @@ export default function SearchBar() {
   const adminUsers = useStore((s) => s.adminUsers)
   const setAdminUsers = useStore((s) => s.setAdminUsers)
   const user = useStore((s) => s.user)
+  const tasksLoading = useStore((s) => s.tasksLoading)
   const isAdmin = user?.role === 'admin'
+
+  const handleSearch = () => {
+    loadTasksFirstPage().catch(console.error)
+  }
 
   useEffect(() => {
     if (!isAdmin || adminUsers.length > 0) return
@@ -93,11 +98,20 @@ export default function SearchBar() {
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch() }}
           type="text"
           placeholder="搜索提示词、参数..."
           className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
         />
       </div>
+      <button
+        type="button"
+        onClick={handleSearch}
+        disabled={tasksLoading}
+        className="flex-shrink-0 px-5 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
+      >
+        查询
+      </button>
     </div>
   )
 }
