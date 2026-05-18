@@ -25,7 +25,7 @@ export default function TaskGrid() {
   const batchDeleteSelected = useStore((s) => s.batchDeleteSelected)
 
   const isAdmin = user?.role === 'admin'
-  const showOwner = isAdmin && filterUserId === 'all'
+  const showOwner = isAdmin
 
   // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite / filterUserId 变化时 debounce reload。
   // 用 ref 跳过首次 effect 避免重复请求。

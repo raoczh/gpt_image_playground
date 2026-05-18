@@ -50,10 +50,19 @@ export default function TaskCard({
     if (src) {
       setThumbSrc(src)
     }
-  }, [task.outputThumbnails, task.outputImages])
+
+    // 后端返回的实际尺寸（保存时用 sharp 写入 images.width/height）
+    const dim = task.outputImageDims?.[0]
+    if (dim && dim.w > 0 && dim.h > 0) {
+      setCoverRatio(formatImageRatio(dim.w, dim.h))
+      setCoverSize(`${dim.w}×${dim.h}`)
+    }
+  }, [task.outputThumbnails, task.outputImages, task.outputImageDims])
 
   useEffect(() => {
     if (!thumbSrc) return
+    // 后端已经给了真实尺寸就不必再加载图片测量；旧数据 fallback 到测量缩略图
+    if (task.outputImageDims?.[0]) return
 
     let cancelled = false
     const image = new Image()
@@ -72,7 +81,7 @@ export default function TaskCard({
     return () => {
       cancelled = true
     }
-  }, [thumbSrc])
+  }, [thumbSrc, task.outputImageDims])
 
   const duration = (() => {
     let seconds: number
@@ -195,7 +204,7 @@ export default function TaskCard({
             </svg>
           )}
           {showOwner && task.owner && (
-            <div className="absolute top-1.5 right-1.5 flex items-center gap-1 bg-black/55 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm max-w-[120px]" title={`操作人：${task.owner.username}`}>
+            <div className="absolute bottom-1 left-1 flex items-center gap-1 bg-black/55 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm max-w-[110px]" title={`操作人：${task.owner.username}`}>
               {task.owner.avatar_url ? (
                 <img src={task.owner.avatar_url} alt="" className="w-3.5 h-3.5 rounded-full flex-shrink-0" />
               ) : null}

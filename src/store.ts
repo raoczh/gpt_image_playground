@@ -539,6 +539,7 @@ function toTaskRecord(t: backendApi.Task): TaskRecord {
     inputThumbnails: t.input_thumb_urls || [],
     outputImages: t.output_image_urls || [],
     outputThumbnails: t.output_thumb_urls || [],
+    outputImageDims: t.output_image_dims ?? undefined,
     status: t.status,
     isFavorite: Boolean(t.is_favorite),
     error: t.error_message || null,

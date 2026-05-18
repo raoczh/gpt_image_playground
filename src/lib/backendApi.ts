@@ -144,6 +144,7 @@ export interface Task {
   output_image_urls: string[];
   input_thumb_urls: string[];
   output_thumb_urls: string[];
+  output_image_dims?: Array<{ w: number; h: number } | null>;
   started_at: number;
   finished_at?: number;
   created_at: string;

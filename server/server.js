@@ -225,6 +225,16 @@ const THUMB_SIZE = 256;
 const THUMB_QUALITY = 70;
 
 // 生成 256px webp 缩略图 buffer；失败返回 null，由调用方决定降级
+async function probeImageDims(srcBuffer) {
+  try {
+    const meta = await sharp(srcBuffer).metadata();
+    if (meta && meta.width && meta.height) return { width: meta.width, height: meta.height };
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] ⚠️  Image metadata probe failed: ${err.message}`);
+  }
+  return { width: null, height: null };
+}
+
 async function generateThumbnailBuffer(srcBuffer) {
   try {
     return await sharp(srcBuffer)
@@ -277,11 +287,12 @@ async function saveGeneratedImageBytes({ userId, buffer, mime, source = 'generat
   await fs.writeFile(filePath, buffer);
 
   const { thumbPath, thumbUrl } = await writeThumbnail(buffer, imageId, uploadDir);
+  const { width, height } = await probeImageDims(buffer);
 
   const fileUrl = `${process.env.IMAGE_BASE_URL}/${filename}`;
   await db.query(
-    'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [imageId, userId, filePath, fileUrl, thumbPath, thumbUrl, buffer.length, mime, source]
+    'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [imageId, userId, filePath, fileUrl, thumbPath, thumbUrl, buffer.length, mime, source, width, height]
   );
 
   console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
@@ -1510,10 +1521,10 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         imageParams.push(req.session.userId);
       }
       const [images] = await db.query(
-        `SELECT id, file_url, thumb_url FROM images WHERE ${imageWhere.join(' AND ')}`,
+        `SELECT id, file_url, thumb_url, width, height FROM images WHERE ${imageWhere.join(' AND ')}`,
         imageParams
       );
-      for (const img of images) imageMap.set(img.id, { url: img.file_url, thumb: img.thumb_url || '' });
+      for (const img of images) imageMap.set(img.id, { url: img.file_url, thumb: img.thumb_url || '', width: img.width || null, height: img.height || null });
     }
 
     const items = parsedRows.map(({ task, inputImageIds, outputImageIds }) => {
@@ -1521,6 +1532,11 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
       const outputImageUrls = outputImageIds.map(id => imageMap.get(id)?.url || '');
       const inputThumbUrls = inputImageIds.map(id => imageMap.get(id)?.thumb || '');
       const outputThumbUrls = outputImageIds.map(id => imageMap.get(id)?.thumb || '');
+      const outputImageDims = outputImageIds.map(id => {
+        const img = imageMap.get(id);
+        if (img && img.width && img.height) return { w: img.width, h: img.height };
+        return null;
+      });
 
       const parseJson = (v) => {
         if (v === null || v === undefined) return null;
@@ -1543,6 +1559,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         output_image_urls: outputImageUrls,
         input_thumb_urls: inputThumbUrls,
         output_thumb_urls: outputThumbUrls,
+        output_image_dims: outputImageDims,
         owner: { id: task.user_id, username: owner_username || '', avatar_url: owner_avatar_url || '' },
       };
     });
@@ -2033,10 +2050,11 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     }
 
     const { thumbPath, thumbUrl } = await writeThumbnail(fileBuffer, imageId, path.dirname(req.file.path));
+    const { width, height } = await probeImageDims(fileBuffer);
 
     await db.query(
-      'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [imageId, req.session.userId, req.file.path, fileUrl, thumbPath, thumbUrl, req.file.size, req.file.mimetype, 'upload']
+      'INSERT INTO images (id, user_id, file_path, file_url, thumb_path, thumb_url, file_size, mime_type, source, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [imageId, req.session.userId, req.file.path, fileUrl, thumbPath, thumbUrl, req.file.size, req.file.mimetype, 'upload', width, height]
     );
 
     console.log(`[${new Date().toISOString()}] ✅ Image uploaded - ID: ${imageId}, Size: ${req.file.size} bytes, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
