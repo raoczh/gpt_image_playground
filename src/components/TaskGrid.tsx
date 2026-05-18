@@ -9,7 +9,7 @@ export default function TaskGrid() {
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
-  const filterUserScope = useStore((s) => s.filterUserScope)
+  const filterUserId = useStore((s) => s.filterUserId)
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
   const tasksLoading = useStore((s) => s.tasksLoading)
@@ -25,9 +25,9 @@ export default function TaskGrid() {
   const batchDeleteSelected = useStore((s) => s.batchDeleteSelected)
 
   const isAdmin = user?.role === 'admin'
-  const showOwner = isAdmin && filterUserScope === 'all'
+  const showOwner = isAdmin && filterUserId === 'all'
 
-  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite / filterUserScope 变化时 debounce reload。
+  // initStore 已经触发首次加载；这里只在 searchQuery / filterStatus / filterFavorite / filterUserId 变化时 debounce reload。
   // 用 ref 跳过首次 effect 避免重复请求。
   const skipFirstRef = useRef(true)
   useEffect(() => {
@@ -40,7 +40,7 @@ export default function TaskGrid() {
       loadTasksFirstPage().catch(console.error)
     }, 300)
     return () => clearTimeout(handle)
-  }, [user, searchQuery, filterStatus, filterFavorite, filterUserScope])
+  }, [user, searchQuery, filterStatus, filterFavorite, filterUserId])
 
   // 滚动到底部时拉下一页
   const sentinelRef = useRef<HTMLDivElement | null>(null)

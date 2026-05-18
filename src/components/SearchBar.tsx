@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { useStore } from '../store'
 import Select from './Select'
+import { listUsers } from '../lib/adminApi'
 
 export default function SearchBar() {
   const searchQuery = useStore((s) => s.searchQuery)
@@ -8,10 +10,31 @@ export default function SearchBar() {
   const setFilterStatus = useStore((s) => s.setFilterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const setFilterFavorite = useStore((s) => s.setFilterFavorite)
-  const filterUserScope = useStore((s) => s.filterUserScope)
-  const setFilterUserScope = useStore((s) => s.setFilterUserScope)
+  const filterUserId = useStore((s) => s.filterUserId)
+  const setFilterUserId = useStore((s) => s.setFilterUserId)
+  const adminUsers = useStore((s) => s.adminUsers)
+  const setAdminUsers = useStore((s) => s.setAdminUsers)
   const user = useStore((s) => s.user)
   const isAdmin = user?.role === 'admin'
+
+  useEffect(() => {
+    if (!isAdmin || adminUsers.length > 0) return
+    let cancelled = false
+    listUsers({ limit: 200 })
+      .then((page) => {
+        if (cancelled) return
+        setAdminUsers(page.items.map((u) => ({ id: u.id, username: u.username })))
+      })
+      .catch((err) => console.error('Failed to load admin users for filter:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin, adminUsers.length, setAdminUsers])
+
+  const userFilterOptions = [
+    { label: '全部', value: 'all' as const },
+    ...adminUsers.map((u) => ({ label: u.username, value: u.id })),
+  ]
 
   return (
     <div className="mt-6 mb-4 flex gap-3 flex-wrap">
@@ -29,14 +52,11 @@ export default function SearchBar() {
         />
       </div>
       {isAdmin && (
-        <div className="relative w-32 flex-shrink-0 z-20">
+        <div className="relative w-40 flex-shrink-0 z-20">
           <Select
-            value={filterUserScope}
-            onChange={(val) => setFilterUserScope(val as any)}
-            options={[
-              { label: '只看自己', value: 'self' },
-              { label: '全部用户', value: 'all' },
-            ]}
+            value={filterUserId}
+            onChange={(val) => setFilterUserId(val === 'all' ? 'all' : Number(val))}
+            options={userFilterOptions}
             className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
           />
         </div>

@@ -124,9 +124,12 @@ interface AppState {
   setFilterStatus: (status: AppState['filterStatus']) => void
   filterFavorite: boolean
   setFilterFavorite: (favorite: boolean) => void
-  /** admin 筛选用户：'self' = 自己（默认），'all' = 全部用户 */
-  filterUserScope: 'self' | 'all'
-  setFilterUserScope: (scope: AppState['filterUserScope']) => void
+  /** admin 筛选用户：'all' = 全部用户（默认），数字 = 指定 user id */
+  filterUserId: 'all' | number
+  setFilterUserId: (v: AppState['filterUserId']) => void
+  /** admin 用户下拉的选项（id + username），仅 admin 加载 */
+  adminUsers: Array<{ id: number; username: string }>
+  setAdminUsers: (users: AppState['adminUsers']) => void
   /** 主页任务列表显示样式：grid（默认）/ list */
   viewMode: 'grid' | 'list'
   setViewMode: (mode: AppState['viewMode']) => void
@@ -244,8 +247,10 @@ export const useStore = create<AppState>()(
   setFilterStatus: (filterStatus) => set({ filterStatus }),
   filterFavorite: false,
   setFilterFavorite: (filterFavorite) => set({ filterFavorite }),
-  filterUserScope: 'self',
-  setFilterUserScope: (filterUserScope) => set({ filterUserScope }),
+  filterUserId: 'all',
+  setFilterUserId: (filterUserId) => set({ filterUserId }),
+  adminUsers: [],
+  setAdminUsers: (adminUsers) => set({ adminUsers }),
   viewMode: 'grid',
   setViewMode: (viewMode) => set({ viewMode }),
   toggleTaskFavorite: async (taskId) => {
@@ -557,12 +562,12 @@ let currentLoadSeq = 0
 
 /** 拉第一页任务（重置 cursor）。搜索 / 过滤变化时调。已运行中的任务会保留在最前面，避免刚提交的 task 被刷掉。 */
 export async function loadTasksFirstPage() {
-  const { user, searchQuery, filterStatus, filterFavorite, filterUserScope } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite, filterUserId } = useStore.getState()
   if (!user) {
     useStore.setState({ tasks: [], tasksCursor: null, tasksHasMore: false })
     return
   }
-  const userIdParam = user.role === 'admin' && filterUserScope === 'all' ? 'all' : undefined
+  const userIdParam = user.role === 'admin' ? filterUserId : undefined
   const mySeq = ++currentLoadSeq
   useStore.setState({ tasksLoading: true })
   try {
@@ -590,9 +595,9 @@ export async function loadTasksFirstPage() {
 
 /** 追加下一页。由滚动到底部触发，幂等。 */
 export async function loadMoreTasks() {
-  const { user, searchQuery, filterStatus, filterFavorite, filterUserScope, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
+  const { user, searchQuery, filterStatus, filterFavorite, filterUserId, tasksCursor, tasksLoading, tasksHasMore } = useStore.getState()
   if (!user || tasksLoading || !tasksHasMore || !tasksCursor) return
-  const userIdParam = user.role === 'admin' && filterUserScope === 'all' ? 'all' : undefined
+  const userIdParam = user.role === 'admin' ? filterUserId : undefined
   useStore.setState({ tasksLoading: true })
   try {
     const page = await backendApi.getTasks({ cursor: tasksCursor, q: searchQuery, status: filterStatus, favorite: filterFavorite, userId: userIdParam })
