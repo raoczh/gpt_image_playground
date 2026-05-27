@@ -519,7 +519,7 @@ async function callOpenAIImageApi(opts) {
       }
     }
 
-    response = await fetch(endpoint, {
+    const requestParams = {
       method: 'POST',
       headers: {
         Authorization: authHeaders.Authorization,
@@ -529,7 +529,10 @@ async function callOpenAIImageApi(opts) {
       cache: 'no-store',
       body: formData,
       signal,
-    });
+    };
+    console.log(`[${new Date().toISOString()}] 📦 Request params:`, JSON.stringify(requestParams, null, 2));
+
+    response = await fetch(endpoint, requestParams);
   } else {
     const endpoint = `${baseUrl}/v1/images/generations`;
     const requestBody = {
@@ -545,7 +548,7 @@ async function callOpenAIImageApi(opts) {
     console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: generations`);
     console.log(`[${new Date().toISOString()}] 📦 Request body:`, JSON.stringify(requestBody, null, 2));
 
-    response = await fetch(endpoint, {
+    const requestParams = {
       method: 'POST',
       headers: {
         Authorization: authHeaders.Authorization,
@@ -556,7 +559,10 @@ async function callOpenAIImageApi(opts) {
       cache: 'no-store',
       body: JSON.stringify(requestBody),
       signal,
-    });
+    };
+    console.log(`[${new Date().toISOString()}] 📦 Request params:`, JSON.stringify(requestParams, null, 2));
+
+    response = await fetch(endpoint, requestParams);
   }
 
   const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
