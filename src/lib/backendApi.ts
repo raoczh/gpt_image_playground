@@ -132,6 +132,7 @@ export interface Task {
   revised_prompt_by_image?: Record<string, string> | null;
   raw_response_payload?: string | null;
   raw_image_urls?: string[] | null;
+  request_meta?: Record<string, any> | null;
   api_profile_id?: string | null;
   api_profile_name?: string | null;
   api_provider?: string | null;

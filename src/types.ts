@@ -127,6 +127,8 @@ export interface TaskRecord {
   rawResponsePayload?: string | null
   /** 上游返回的图片外链（A-2），用于复制原图 URL */
   rawImageUrls?: string[] | null
+  /** 请求元数据快照（endpoint/method/params） */
+  requestMeta?: Record<string, any> | null
   /** 任务提交时使用的 API Profile ID 快照（B-4） */
   apiProfileId?: string | null
   apiProfileName?: string | null

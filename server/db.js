@@ -257,6 +257,26 @@ async function initDatabase() {
       console.log('  ✅ Added api_profile_* snapshot columns');
     }
 
+    // 检查并添加 tasks 表的 request_meta / output_image_sizes 字段
+    {
+      const [existingTaskCols] = await connection.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks'`,
+        [dbName]
+      );
+      const taskColSet = new Set(existingTaskCols.map((r) => r.COLUMN_NAME));
+      const newTaskCols = [
+        ['request_meta', `ADD COLUMN request_meta JSON NULL COMMENT '请求元数据（endpoint/method/params 快照）' AFTER raw_image_urls`],
+        ['output_image_sizes', `ADD COLUMN output_image_sizes JSON NULL COMMENT '输出图片尺寸 [{w,h},...]' AFTER output_image_ids`],
+      ];
+      const missingTaskCols = newTaskCols.filter(([name]) => !taskColSet.has(name));
+      if (missingTaskCols.length > 0) {
+        console.log(`  📝 Adding columns to tasks: ${missingTaskCols.map(([n]) => n).join(', ')}`);
+        await connection.query(`ALTER TABLE tasks ${missingTaskCols.map(([, ddl]) => ddl).join(', ')}`);
+        console.log('  ✅ Added request_meta / output_image_sizes columns');
+      }
+    }
+
     // 创建 API Profile 表（U2-2）
     await connection.query(`
       CREATE TABLE IF NOT EXISTS user_api_profiles (

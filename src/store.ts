@@ -546,6 +546,7 @@ function toTaskRecord(t: backendApi.Task): TaskRecord {
     revisedPromptByImage: t.revised_prompt_by_image ?? null,
     rawResponsePayload: t.raw_response_payload ?? null,
     rawImageUrls: t.raw_image_urls ?? null,
+    requestMeta: t.request_meta ?? null,
     apiProfileId: t.api_profile_id ?? null,
     apiProfileName: t.api_profile_name ?? null,
     apiProvider: t.api_provider ?? null,

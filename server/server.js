@@ -267,7 +267,7 @@ async function saveGeneratedImageBytes({ userId, buffer, mime, source = 'generat
   const dataUrl = `data:${mime};base64,${b64}`;
   const imageId = crypto.createHash('sha256').update(dataUrl).digest('hex');
 
-  const [existing] = await db.query('SELECT id, file_url, thumb_url, deleted_at FROM images WHERE id = ?', [imageId]);
+  const [existing] = await db.query('SELECT id, file_url, thumb_url, width, height, deleted_at FROM images WHERE id = ?', [imageId]);
   if (existing.length > 0) {
     if (existing[0].deleted_at) {
       await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
@@ -275,7 +275,8 @@ async function saveGeneratedImageBytes({ userId, buffer, mime, source = 'generat
     } else {
       console.log(`[${new Date().toISOString()}] ♻️  Image already exists - ID: ${imageId}`);
     }
-    return { id: imageId, url: existing[0].file_url, thumb: existing[0].thumb_url || '' };
+    const dims = (existing[0].width && existing[0].height) ? { w: existing[0].width, h: existing[0].height } : null;
+    return { id: imageId, url: existing[0].file_url, thumb: existing[0].thumb_url || '', dims };
   }
 
   const ext = (mime.split('/')[1] || 'png').toLowerCase();
@@ -295,8 +296,9 @@ async function saveGeneratedImageBytes({ userId, buffer, mime, source = 'generat
     [imageId, userId, filePath, fileUrl, thumbPath, thumbUrl, buffer.length, mime, source, width, height]
   );
 
-  console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
-  return { id: imageId, url: fileUrl, thumb: thumbUrl || '' };
+  const dims = (width && height) ? { w: width, h: height } : null;
+  console.log(`[${new Date().toISOString()}] ✅ Image saved - ID: ${imageId}, Size: ${buffer.length} bytes, Dims: ${dims ? `${dims.w}×${dims.h}` : 'unknown'}, Thumb: ${thumbUrl ? 'ok' : 'skip'}`);
+  return { id: imageId, url: fileUrl, thumb: thumbUrl || '', dims };
 }
 
 // 按 ID 从磁盘批量加载输入图片，保持顺序并构造 dataUrl 列表。缺图抛业务错误（statusCode=400）。
@@ -324,7 +326,6 @@ async function loadInputImageDataUrls(userId, inputImageIds) {
 }
 
 async function callUpstreamImageApi(userId, payload, ctx) {
-  console.log(`[${new Date().toISOString()}] 📡 Loading API settings for user ${userId}, profileId=${payload.profileId || 'default'}`);
   const apiSettings = await loadUserApiSettings(userId, payload.profileId || null);
   // 把已加载的 profile 信息回写出去（task 快照）
   if (ctx) {
@@ -370,6 +371,31 @@ async function callUpstreamImageApi(userId, payload, ctx) {
   });
 }
 
+// ─── 日志辅助工具 ───────────────────────────────────────────────────────────
+
+function truncateForLog(str, maxLen = 80) {
+  if (typeof str !== 'string') return String(str);
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen) + `...[${str.length} chars]`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function logBox(title, lines) {
+  const ts = new Date().toISOString();
+  console.log(`[${ts}] ┌─── ${title} ───`);
+  for (const line of lines) {
+    console.log(`[${ts}] │ ${line}`);
+  }
+  console.log(`[${ts}] └${'─'.repeat(title.length + 6)}`);
+}
+
+// ─── callOpenAIImageApi ─────────────────────────────────────────────────────
+
 async function callOpenAIImageApi(opts) {
   const { apiSettings, baseUrl, prompt, params, inputImageDataUrls, isEdit, mime, maskDataUrl, maskTargetImageId, signal } = opts;
   const authHeaders = {
@@ -377,8 +403,6 @@ async function callOpenAIImageApi(opts) {
     'Cache-Control': 'no-store, no-cache, max-age=0',
     Pragma: 'no-cache',
   };
-
-  console.log(`[${new Date().toISOString()}] 🔧 OpenAI Request - IsEdit: ${isEdit}, Size: ${params.size}, Quality: ${params.quality}, Format: ${params.output_format}`);
 
   if (apiSettings.apiFormat === 'responses') {
     const tool = {
@@ -410,8 +434,34 @@ async function callOpenAIImageApi(opts) {
       tools: [tool],
       tool_choice: 'required',
     };
-    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: responses`);
-    console.log(`[${new Date().toISOString()}] 📦 Request body:`, JSON.stringify(requestBody, null, 2));
+
+    // ─── 请求日志 ───
+    const inputImageSummary = isEdit
+      ? inputImageDataUrls.map((u, i) => {
+          const m = u.match(/^data:(image\/[^;]+);base64,(.+)$/);
+          return m ? `#${i + 1} ${m[1]} ${formatBytes(Buffer.from(m[2], 'base64').length)}` : `#${i + 1} unknown`;
+        })
+      : [];
+    logBox('UPSTREAM REQUEST (responses)', [
+      `Endpoint: POST ${endpoint}`,
+      `Model:    ${apiSettings.model}`,
+      `Prompt:   "${truncateForLog(prompt, 120)}"`,
+      `Params:   size=${params.size} quality=${params.quality} format=${params.output_format} compression=${params.output_compression ?? 'N/A'} moderation=${params.moderation} n=${params.n || 1}`,
+      `Tool:     ${JSON.stringify(tool)}`,
+      `IsEdit:   ${isEdit}${isEdit ? ` (${inputImageDataUrls.length} images)` : ''}`,
+      ...(inputImageSummary.length > 0 ? [`Images:   ${inputImageSummary.join(', ')}`] : []),
+    ]);
+
+    const requestMeta = {
+      endpoint,
+      method: 'responses',
+      model: apiSettings.model,
+      prompt: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt,
+      params: { size: params.size, quality: params.quality, output_format: params.output_format, output_compression: params.output_compression, moderation: params.moderation, n: params.n || 1 },
+      isEdit,
+      inputImageCount: inputImageDataUrls.length,
+    };
+
     const fetchStartTime = Date.now();
 
     const response = await fetch(endpoint, {
@@ -428,10 +478,12 @@ async function callOpenAIImageApi(opts) {
     });
 
     const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
-    console.log(`[${new Date().toISOString()}] 📥 Upstream response received - Status: ${response.status}, Time: ${fetchElapsed}s`);
 
     if (!response.ok) {
-      console.error(`[${new Date().toISOString()}] ⚠️  Upstream API error - Status: ${response.status}`);
+      logBox('UPSTREAM ERROR', [
+        `Status:   ${response.status} ${response.statusText}`,
+        `Time:     ${fetchElapsed}s`,
+      ]);
       await parseUpstreamError(response);
     }
 
@@ -463,21 +515,38 @@ async function callOpenAIImageApi(opts) {
       throw new Error('接口未返回可用图片数据');
     }
 
+    // ─── 响应日志 ───
+    const imageSizesEstimate = images.map((img, i) => {
+      const b64 = img.replace(/^data:[^;]+;base64,/, '');
+      return `#${i + 1} ~${formatBytes(Math.floor(b64.length * 0.75))}`;
+    });
+    logBox('UPSTREAM RESPONSE (responses)', [
+      `Status:   ${response.status}`,
+      `Time:     ${fetchElapsed}s`,
+      `Images:   ${images.length} [${imageSizesEstimate.join(', ')}]`,
+      ...(Object.keys(actualParamsCollected).length > 0 ? [`Actual:   ${JSON.stringify(actualParamsCollected)}`] : []),
+      ...(revisedPrompts.length > 0 ? revisedPrompts.map((rp, i) => `Revised#${i + 1}: "${truncateForLog(rp, 100)}"`) : []),
+    ]);
+
     return {
       images,
       actualParams: Object.keys(actualParamsCollected).length > 0 ? actualParamsCollected : null,
       revisedPrompts: revisedPrompts.length > 0 ? revisedPrompts : null,
       rawPayload: payloadJson,
       rawImageUrls: null,
+      requestMeta,
     };
   }
 
+  // ─── imagen format (images/generations or images/edits) ───
+
   let response;
+  let endpoint;
+  let requestMeta;
   const fetchStartTime = Date.now();
 
   if (isEdit) {
-    const endpoint = `${baseUrl}/v1/images/edits`;
-    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: edits, Images: ${inputImageDataUrls.length}`);
+    endpoint = `${baseUrl}/v1/images/edits`;
 
     const formData = new FormData();
     formData.append('model', apiSettings.model);
@@ -495,8 +564,8 @@ async function callOpenAIImageApi(opts) {
       formData.append('n', String(params.n));
     }
 
-    console.log(`[${new Date().toISOString()}] 📦 FormData fields: model=${apiSettings.model}, prompt="${prompt.substring(0, 50)}...", size=${params.size}, quality=${params.quality}, format=${params.output_format}, images=${inputImageDataUrls.length}, n=${params.n || 1}`);
-
+    // 解析输入图片元数据用于日志
+    const inputImageMetas = [];
     for (let i = 0; i < inputImageDataUrls.length; i++) {
       const dataUrl = inputImageDataUrls[i];
       const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
@@ -504,22 +573,44 @@ async function callOpenAIImageApi(opts) {
       const blob = new Blob([Buffer.from(matches[2], 'base64')], { type: matches[1] });
       const ext = matches[1].split('/')[1] || 'png';
       formData.append('image[]', blob, `input-${i + 1}.${ext}`);
-      console.log(`[${new Date().toISOString()}] 📎 Added image ${i + 1}: ${matches[1]}, size: ${blob.size} bytes`);
+      inputImageMetas.push({ mime: matches[1], size: blob.size });
     }
 
     // 蒙版编辑：把 maskDataUrl append 到 FormData。要求 mask 与第一张参考图（target）对齐
+    let maskInfo = null;
     if (maskDataUrl && typeof maskDataUrl === 'string') {
       const maskMatches = maskDataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
       if (maskMatches) {
         const maskBlob = new Blob([Buffer.from(maskMatches[2], 'base64')], { type: maskMatches[1] });
         formData.append('mask', maskBlob, 'mask.png');
-        console.log(`[${new Date().toISOString()}] 🎨 Added mask: ${maskMatches[1]}, size: ${maskBlob.size} bytes, targetId: ${maskTargetImageId || 'n/a'}`);
+        maskInfo = { mime: maskMatches[1], size: maskBlob.size, targetId: maskTargetImageId || null };
       } else {
         console.warn(`[${new Date().toISOString()}] ⚠️  Invalid maskDataUrl format, mask skipped`);
       }
     }
 
-    const requestParams = {
+    // ─── 请求日志 ───
+    logBox('UPSTREAM REQUEST (edits)', [
+      `Endpoint: POST ${endpoint}`,
+      `Model:    ${apiSettings.model}`,
+      `Prompt:   "${truncateForLog(prompt, 120)}"`,
+      `Params:   size=${params.size} quality=${params.quality} format=${params.output_format} compression=${params.output_compression ?? 'N/A'} moderation=${params.moderation} n=${params.n || 1}`,
+      `Images:   ${inputImageMetas.map((m, i) => `#${i + 1} ${m.mime} ${formatBytes(m.size)}`).join(', ')}`,
+      ...(maskInfo ? [`Mask:     ${maskInfo.mime} ${formatBytes(maskInfo.size)} target=${maskInfo.targetId || 'N/A'}`] : []),
+    ]);
+
+    requestMeta = {
+      endpoint,
+      method: 'edits',
+      model: apiSettings.model,
+      prompt: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt,
+      params: { size: params.size, quality: params.quality, output_format: params.output_format, output_compression: params.output_compression, moderation: params.moderation, n: params.n || 1 },
+      isEdit: true,
+      inputImageCount: inputImageMetas.length,
+      hasMask: !!maskInfo,
+    };
+
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         Authorization: authHeaders.Authorization,
@@ -529,12 +620,9 @@ async function callOpenAIImageApi(opts) {
       cache: 'no-store',
       body: formData,
       signal,
-    };
-    console.log(`[${new Date().toISOString()}] 📦 Request params:`, JSON.stringify(requestParams, null, 2));
-
-    response = await fetch(endpoint, requestParams);
+    });
   } else {
-    const endpoint = `${baseUrl}/v1/images/generations`;
+    endpoint = `${baseUrl}/v1/images/generations`;
     const requestBody = {
       model: apiSettings.model,
       prompt,
@@ -545,10 +633,26 @@ async function callOpenAIImageApi(opts) {
       ...(params.output_format !== 'png' && params.output_compression != null ? { output_compression: params.output_compression } : {}),
       ...(params.n > 1 ? { n: params.n } : {}),
     };
-    console.log(`[${new Date().toISOString()}] 🚀 Calling upstream API - Endpoint: ${endpoint}, Method: generations`);
-    console.log(`[${new Date().toISOString()}] 📦 Request body:`, JSON.stringify(requestBody, null, 2));
 
-    const requestParams = {
+    // ─── 请求日志 ───
+    logBox('UPSTREAM REQUEST (generations)', [
+      `Endpoint: POST ${endpoint}`,
+      `Model:    ${apiSettings.model}`,
+      `Prompt:   "${truncateForLog(prompt, 120)}"`,
+      `Params:   size=${params.size} quality=${params.quality} format=${params.output_format} compression=${params.output_compression ?? 'N/A'} moderation=${params.moderation} n=${params.n || 1}`,
+    ]);
+
+    requestMeta = {
+      endpoint,
+      method: 'generations',
+      model: apiSettings.model,
+      prompt: prompt.length > 200 ? prompt.slice(0, 200) + '...' : prompt,
+      params: { size: params.size, quality: params.quality, output_format: params.output_format, output_compression: params.output_compression, moderation: params.moderation, n: params.n || 1 },
+      isEdit: false,
+      inputImageCount: 0,
+    };
+
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         Authorization: authHeaders.Authorization,
@@ -559,17 +663,17 @@ async function callOpenAIImageApi(opts) {
       cache: 'no-store',
       body: JSON.stringify(requestBody),
       signal,
-    };
-    console.log(`[${new Date().toISOString()}] 📦 Request params:`, JSON.stringify(requestParams, null, 2));
-
-    response = await fetch(endpoint, requestParams);
+    });
   }
 
   const fetchElapsed = ((Date.now() - fetchStartTime) / 1000).toFixed(2);
-  console.log(`[${new Date().toISOString()}] 📥 Upstream response received - Status: ${response.status}, Time: ${fetchElapsed}s`);
 
   if (!response.ok) {
-    console.error(`[${new Date().toISOString()}] ⚠️  Upstream API error - Status: ${response.status}`);
+    logBox('UPSTREAM ERROR', [
+      `Status:   ${response.status} ${response.statusText}`,
+      `Time:     ${fetchElapsed}s`,
+      `Endpoint: ${endpoint}`,
+    ]);
     await parseUpstreamError(response);
   }
 
@@ -608,12 +712,27 @@ async function callOpenAIImageApi(opts) {
     if (payloadJson[key] !== undefined) actualParams[key] = payloadJson[key];
   }
 
+  // ─── 响应日志 ───
+  const imageSizesEstimate = images.map((img, i) => {
+    const b64 = img.replace(/^data:[^;]+;base64,/, '');
+    return `#${i + 1} ~${formatBytes(Math.floor(b64.length * 0.75))}`;
+  });
+  logBox(`UPSTREAM RESPONSE (${isEdit ? 'edits' : 'generations'})`, [
+    `Status:   ${response.status}`,
+    `Time:     ${fetchElapsed}s`,
+    `Images:   ${images.length} [${imageSizesEstimate.join(', ')}]`,
+    ...(rawImageUrls.length > 0 ? [`URLs:     ${rawImageUrls.map(u => truncateForLog(u, 100)).join(', ')}`] : []),
+    ...(Object.keys(actualParams).length > 0 ? [`Actual:   ${JSON.stringify(actualParams)}`] : []),
+    ...(revisedPrompts.length > 0 ? revisedPrompts.map((rp, i) => `Revised#${i + 1}: "${truncateForLog(rp, 100)}"`) : []),
+  ]);
+
   return {
     images,
     actualParams: Object.keys(actualParams).length > 0 ? actualParams : null,
     revisedPrompts: revisedPrompts.length > 0 ? revisedPrompts : null,
     rawPayload: payloadJson,
     rawImageUrls: rawImageUrls.length > 0 ? rawImageUrls : null,
+    requestMeta,
   };
 }
 
@@ -1557,6 +1676,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
         actual_params: parseJson(task.actual_params),
         revised_prompt_by_image: parseJson(task.revised_prompt_by_image),
         raw_image_urls: parseJson(task.raw_image_urls),
+        request_meta: parseJson(task.request_meta),
         input_image_ids: inputImageIds,
         output_image_ids: outputImageIds,
         input_image_urls: inputImageUrls,
@@ -1906,23 +2026,58 @@ app.post('/api/generate', requireAuth, async (req, res) => {
             revisedPromptByImage[saved[i].id] = result.revisedPrompts[i];
           }
         }
-        // A-2：raw_response_payload 体积可能很大，做大小裁剪避免拖死 DB
+        // A-2：构建结构化的 raw_response_payload，包含请求元数据和清理后的响应
         let rawPayloadJson = null;
-        if (result.rawPayload) {
-          try {
-            const str = JSON.stringify(result.rawPayload);
-            // 16KB 上限，超过则截掉，保留头部用于排查
-            rawPayloadJson = str.length > 16 * 1024 ? str.slice(0, 16 * 1024) + '...[truncated]' : str;
-          } catch {
-            rawPayloadJson = null;
+        try {
+          // 构建可读的结构化数据
+          const structuredPayload = {
+            request: result.requestMeta || null,
+            response: {
+              imageCount: saved.length,
+              images: saved.map((s, i) => ({
+                id: s.id,
+                url: s.url,
+                ...(result.rawImageUrls?.[i] ? { rawUrl: result.rawImageUrls[i] } : {}),
+              })),
+              actualParams: result.actualParams || null,
+              revisedPrompts: result.revisedPrompts || null,
+            },
+          };
+          // 也保留原始上游响应（去掉 base64 数据以节省空间）
+          if (result.rawPayload) {
+            const cleanPayload = JSON.parse(JSON.stringify(result.rawPayload));
+            // 清理 responses 格式中的 base64 数据
+            if (Array.isArray(cleanPayload?.output)) {
+              for (const item of cleanPayload.output) {
+                if (item.result && typeof item.result === 'string' && item.result.length > 200) {
+                  item.result = `[base64 ${formatBytes(Math.floor(item.result.length * 0.75))}]`;
+                }
+              }
+            }
+            // 清理 imagen 格式中的 base64 数据
+            if (Array.isArray(cleanPayload?.data)) {
+              for (const item of cleanPayload.data) {
+                if (item.b64_json && typeof item.b64_json === 'string' && item.b64_json.length > 200) {
+                  item.b64_json = `[base64 ${formatBytes(Math.floor(item.b64_json.length * 0.75))}]`;
+                }
+              }
+            }
+            structuredPayload.upstream = cleanPayload;
           }
+          const str = JSON.stringify(structuredPayload);
+          // 64KB 上限
+          rawPayloadJson = str.length > 64 * 1024 ? str.slice(0, 64 * 1024) + '...[truncated]' : str;
+        } catch {
+          rawPayloadJson = null;
         }
         const apiSettings = callContext.apiSettings || {};
+        // 输出图片尺寸
+        const outputImageSizes = saved.map((s) => s.dims || null);
         await db.query(
           `UPDATE tasks
-           SET status = ?, output_image_ids = ?, finished_at = ?,
+           SET status = ?, output_image_ids = ?, output_image_sizes = ?, finished_at = ?,
                actual_params = ?, revised_prompt_by_image = ?,
-               raw_response_payload = ?, raw_image_urls = ?,
+               raw_response_payload = ?, raw_image_urls = ?, request_meta = ?,
                api_profile_id = COALESCE(api_profile_id, ?),
                api_profile_name = COALESCE(api_profile_name, ?),
                api_provider = COALESCE(api_provider, ?),
@@ -1931,11 +2086,13 @@ app.post('/api/generate', requireAuth, async (req, res) => {
           [
             'done',
             JSON.stringify(saved.map((s) => s.id)),
+            JSON.stringify(outputImageSizes),
             Date.now(),
             result.actualParams ? JSON.stringify(result.actualParams) : null,
             Object.keys(revisedPromptByImage).length > 0 ? JSON.stringify(revisedPromptByImage) : null,
             rawPayloadJson,
             result.rawImageUrls ? JSON.stringify(result.rawImageUrls) : null,
+            result.requestMeta ? JSON.stringify(result.requestMeta) : null,
             apiSettings.profileId || null,
             apiSettings.profileName || null,
             apiSettings.provider || null,
@@ -1950,19 +2107,24 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`[${new Date().toISOString()}] ✅ Generate success - User: ${req.session.userId}, Task: ${taskId || 'none'}, Images: ${saved.length}, Time: ${elapsed}s`);
+    const dimsSummary = saved.map((s, i) => s.dims ? `#${i + 1} ${s.dims.w}×${s.dims.h}` : `#${i + 1} ?`).join(', ');
+    logBox('GENERATE COMPLETE', [
+      `User:     ${req.session.userId}`,
+      `Task:     ${taskId || 'none'}`,
+      `Images:   ${saved.length} [${dimsSummary}]`,
+      `Time:     ${elapsed}s`,
+    ]);
     res.set('Cache-Control', 'no-store');
     res.json({ images: saved });
   } catch (error) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.error(`[${new Date().toISOString()}] ❌ Generate failed - User: ${req.session.userId}, Task: ${taskId || 'none'}, Time: ${elapsed}s`);
-    console.error('Error details:', {
-      name: error.name,
-      message: error.message,
-      cause: error.cause,
-      stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-      response: error.response?.data
-    });
+    logBox('GENERATE FAILED', [
+      `User:     ${req.session.userId}`,
+      `Task:     ${taskId || 'none'}`,
+      `Time:     ${elapsed}s`,
+      `Error:    ${error.name}: ${truncateForLog(error.message, 200)}`,
+      ...(error.cause ? [`Cause:    ${truncateForLog(String(error.cause), 150)}`] : []),
+    ]);
     const status = error.statusCode || error.response?.status || 500;
     const rawMessage = error.response?.data?.error?.message || error.response?.data?.message || error.message || 'Generate failed';
     // statusCode 是我们自己抛的业务错误（如参考图缺失），直接透传；其余走友好化（含 abort/timeout/network）
