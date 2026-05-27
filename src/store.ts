@@ -380,8 +380,6 @@ export const useStore = create<AppState>()(
           enterSubmit: s.settings.enterSubmit,
           clearInputAfterSubmit: s.settings.clearInputAfterSubmit,
           persistInputOnRestart: s.settings.persistInputOnRestart,
-          reuseTaskApiProfileTemporarily: s.settings.reuseTaskApiProfileTemporarily,
-          alwaysShowRetryButton: s.settings.alwaysShowRetryButton,
         },
       }),
     },
@@ -478,8 +476,6 @@ const PREFERENCE_KEYS = [
   'enterSubmit',
   'clearInputAfterSubmit',
   'persistInputOnRestart',
-  'reuseTaskApiProfileTemporarily',
-  'alwaysShowRetryButton',
 ] as const
 
 type PreferenceKey = (typeof PREFERENCE_KEYS)[number]
@@ -754,60 +750,33 @@ function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   setTasks(updated)
 }
 
-/**
- * 重试：基于一条已存在任务的提示词 / 参数 / 输入图，重新提交一次。
- * 提交后等同于普通新任务，新任务有自己的 id；旧任务保留不动（避免误删）。
- */
-export async function retryTask(task: TaskRecord): Promise<void> {
-  const { setPrompt, setParams, setInputImages, showToast, settings } = useStore.getState()
-  setPrompt(task.prompt)
-  setParams(task.params)
-  // 临时切换到任务当时的 profile（B-4）
-  if (settings.reuseTaskApiProfileTemporarily && task.apiProfileId) {
-    const exists = useStore.getState().profiles.some((p) => p.id === task.apiProfileId)
-    if (exists) {
-      useStore.setState({ activeProfileId: task.apiProfileId })
-    } else {
-      showToast('原 Profile 已被删除，使用当前默认 Profile', 'info')
-    }
-  }
-  const imgs: InputImage[] = []
-  for (const imgId of task.inputImageIds) {
-    const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) imgs.push({ id: imgId, dataUrl })
-  }
-  setInputImages(imgs)
-  // 立即提交
-  await submitTask()
-}
-
-/** 复用配置 */
+/** 复用配置：把任务的提示词、参数、参考图原图都恢复到输入框，使用当前选中的 Profile */
 export async function reuseConfig(task: TaskRecord) {
-  const { setPrompt, setParams, setInputImages, showToast, settings } = useStore.getState()
+  const { setPrompt, setParams, setInputImages, showToast } = useStore.getState()
   setPrompt(task.prompt)
   setParams(task.params)
 
-  // B-4: 临时切到任务当时的 Profile（如果开关开启 + Profile 还存在）
-  if (settings.reuseTaskApiProfileTemporarily && task.apiProfileId) {
-    const exists = useStore.getState().profiles.some((p) => p.id === task.apiProfileId)
-    if (exists) {
-      useStore.setState({ activeProfileId: task.apiProfileId })
-      showToast(`已临时切换到原任务的 Profile：${task.apiProfileName || task.apiProfileId}`, 'info')
-    } else {
-      showToast('原任务的 Profile 已被删除，将使用当前 Profile', 'info')
-    }
-  }
-
-  // 恢复输入图片
+  // 恢复参考图：从后端原图 URL 下载并重新上传到当前用户名下，确保提交时后端能按 user_id 找到图片
   const imgs: InputImage[] = []
-  for (const imgId of task.inputImageIds) {
-    const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) {
-      imgs.push({ id: imgId, dataUrl })
+  for (let i = 0; i < task.inputImageIds.length; i++) {
+    const remoteUrl = task.inputImageUrls?.[i]
+    if (!remoteUrl) continue
+    const dataUrl = await resolveImageToDataUrl(remoteUrl)
+    if (!dataUrl) continue
+    try {
+      const saved = await backendApi.saveImage(dataUrl, 'upload')
+      cacheImage(saved.id, dataUrl)
+      imgs.push({ id: saved.id, dataUrl })
+    } catch {
+      // 上传失败则跳过该图
     }
   }
   setInputImages(imgs)
-  showToast('已复用配置到输入框', 'success')
+  if (imgs.length < task.inputImageIds.length) {
+    showToast(`已复用配置（${imgs.length}/${task.inputImageIds.length} 张参考图加载成功）`, 'info')
+  } else {
+    showToast('已复用配置到输入框', 'success')
+  }
 }
 
 /** 将图片标识（URL / data URL）解析为 data URL */

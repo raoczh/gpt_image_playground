@@ -39,10 +39,6 @@ export interface AppSettings {
   clearInputAfterSubmit: boolean
   /** 习惯：重启后恢复上次输入 */
   persistInputOnRestart: boolean
-  /** 习惯：复用历史任务时临时切到该任务当时的 Profile */
-  reuseTaskApiProfileTemporarily: boolean
-  /** 习惯：在完成态下也显示"重试"按钮 */
-  alwaysShowRetryButton: boolean
 }
 
 const DEFAULT_BASE_URL = ''
@@ -58,8 +54,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enterSubmit: false,
   clearInputAfterSubmit: true,
   persistInputOnRestart: false,
-  reuseTaskApiProfileTemporarily: true,
-  alwaysShowRetryButton: false,
 }
 
 // ===== 任务参数 =====

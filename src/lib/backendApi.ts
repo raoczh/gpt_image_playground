@@ -99,8 +99,6 @@ export interface UserPreferences {
   enterSubmit?: boolean;
   clearInputAfterSubmit?: boolean;
   persistInputOnRestart?: boolean;
-  reuseTaskApiProfileTemporarily?: boolean;
-  alwaysShowRetryButton?: boolean;
 }
 
 export async function getPreferences(): Promise<{ preferences: UserPreferences }> {

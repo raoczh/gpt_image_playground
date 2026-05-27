@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useStore, reuseConfig, editOutputs, removeTask, retryTask } from '../store'
+import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { formatImageRatio } from '../lib/size'
 
@@ -10,7 +10,6 @@ export default function DetailModal() {
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
-  const alwaysShowRetryButton = useStore((s) => s.settings.alwaysShowRetryButton)
   const [showRawPayload, setShowRawPayload] = useState(false)
 
   const [imageIndex, setImageIndex] = useState(0)
@@ -149,15 +148,6 @@ export default function DetailModal() {
       showToast(`已复制 ${urls.length} 个图片 URL`, 'success')
     } catch {
       showToast('复制失败', 'error')
-    }
-  }
-
-  const handleRetry = async () => {
-    try {
-      await retryTask(task)
-      setDetailTaskId(null)
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '重试失败', 'error')
     }
   }
 
@@ -510,18 +500,6 @@ export default function DetailModal() {
 
           {/* 操作按钮 */}
           <div className="flex gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.08]">
-            {(task.status === 'error' || alwaysShowRetryButton) && (
-              <button
-                onClick={handleRetry}
-                className="flex-1 flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition text-xs sm:text-sm font-medium whitespace-nowrap"
-                title="使用相同参数重新生成（新任务）"
-              >
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M4 20a8 8 0 0114-5M20 4a8 8 0 00-14 5" />
-                </svg>
-                重试
-              </button>
-            )}
             <button
               onClick={handleReuse}
               className="flex-1 flex items-center justify-center gap-1.5 px-2 sm:px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition text-xs sm:text-sm font-medium whitespace-nowrap"

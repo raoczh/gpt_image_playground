@@ -1014,8 +1014,6 @@ const PREFERENCE_KEYS = [
   'enterSubmit',
   'clearInputAfterSubmit',
   'persistInputOnRestart',
-  'reuseTaskApiProfileTemporarily',
-  'alwaysShowRetryButton',
 ];
 
 function pickPreferences(input) {

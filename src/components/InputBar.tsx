@@ -450,6 +450,7 @@ export default function InputBar() {
               </div>
               <span
                 className="absolute -bottom-1 -right-1 w-[22px] h-[22px] rounded-full bg-blue-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-blue-600 z-30"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
                   setMaskEditorImageId(img.id)
@@ -462,6 +463,7 @@ export default function InputBar() {
               </span>
               <span
                 className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 z-30"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
                   removeInputImage(idx)

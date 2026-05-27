@@ -895,18 +895,6 @@ function PreferencesTab({ settings }: { settings: AppSettings }) {
           checked={settings.persistInputOnRestart}
           onChange={(v) => setPreference('persistInputOnRestart', v)}
         />
-        <ToggleRow
-          label="复用任务时临时切换 Profile"
-          desc="复用 / 重试历史任务时按其当时使用的 Profile 配置发起"
-          checked={settings.reuseTaskApiProfileTemporarily}
-          onChange={(v) => setPreference('reuseTaskApiProfileTemporarily', v)}
-        />
-        <ToggleRow
-          label="完成态显示重试按钮"
-          desc="详情页对已成功的任务也显示重试按钮"
-          checked={settings.alwaysShowRetryButton}
-          onChange={(v) => setPreference('alwaysShowRetryButton', v)}
-        />
       </div>
     </div>
   )
