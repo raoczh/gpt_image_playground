@@ -714,7 +714,7 @@ async function executeTask(taskId: string, inputImageIds: string[], maskDataUrl?
       timeoutSec: useStore.getState().settings.timeout,
       maskDataUrl,
       maskTargetImageId,
-      profileId: useStore.getState().activeProfileId || undefined,
+      profileId: useStore.getState().profiles.find((p) => p.isDefault)?.id || undefined,
     })
 
     // 服务端已落盘并直接 UPDATE tasks 状态，前端只更新本地 store
