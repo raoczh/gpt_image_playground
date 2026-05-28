@@ -22,6 +22,7 @@ import {
   type AdminUserSettings,
 } from '../../lib/adminApi'
 import { useStore } from '../../store'
+import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 
 type Tab = 'overview' | 'settings' | 'profiles' | 'providers' | 'quota'
 
@@ -39,6 +40,9 @@ export default function UserDetailDrawer({ userId, onClose, onUpdated }: Props) 
   const [tab, setTab] = useState<Tab>('overview')
   const [loading, setLoading] = useState(true)
 
+  // 抽屉支持 ESC 关闭。栈式 ESC：如果有 ConfirmDialog 打开，ESC 先关 ConfirmDialog，再次 ESC 才关抽屉
+  useCloseOnEscape(true, onClose)
+
   const reloadUser = useCallback(async () => {
     try {
       const u = await getUser(userId)
@@ -55,8 +59,8 @@ export default function UserDetailDrawer({ userId, onClose, onUpdated }: Props) 
 
   return (
     <div className="fixed inset-0 z-50 flex">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative ml-auto h-full w-full max-w-3xl bg-white dark:bg-gray-950 shadow-xl flex flex-col">
+      <div className="absolute inset-0 bg-black/40 animate-overlay-in" onClick={onClose} />
+      <div className="relative ml-auto h-full w-full max-w-3xl bg-white dark:bg-gray-950 shadow-xl flex flex-col animate-drawer-in-right">
         <header className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-white/[0.08]">
           <div className="flex items-center gap-3">
             {user?.avatar_url && <img src={user.avatar_url} alt="" className="w-8 h-8 rounded-full" />}
@@ -137,7 +141,14 @@ function OverviewTab({
 }: {
   user: AdminUser
   onChanged: () => void
-  setConfirm: (d: { title: string; message: string; action: () => void } | null) => void
+  setConfirm: (d: {
+    title: string
+    message: string
+    action: () => void | Promise<void>
+    confirmText?: string
+    cancelText?: string
+    tone?: 'danger' | 'primary' | 'warning'
+  } | null) => void
 }) {
   const me = useStore((s) => s.user)
   const showToast = useStore((s) => s.showToast)
@@ -154,14 +165,17 @@ function OverviewTab({
 
   const isSelf = me?.id === user.id
 
-  const handleAction = async (
+  const handleAction = (
     title: string,
     message: string,
     action: () => Promise<void>,
+    opts: { confirmText?: string; tone?: 'danger' | 'primary' | 'warning' } = {},
   ) => {
     setConfirm({
       title,
       message,
+      confirmText: opts.confirmText,
+      tone: opts.tone,
       action: async () => {
         try {
           await action()
@@ -199,7 +213,14 @@ function OverviewTab({
       <div className="flex flex-wrap gap-2">
         {user.status === 'pending' && (
           <button
-            onClick={() => handleAction('审核通过', `通过 ${user.username} 的注册申请？`, () => approveUser(user.id))}
+            onClick={() =>
+              handleAction(
+                '审核通过',
+                `通过 ${user.username} 的注册申请？`,
+                () => approveUser(user.id),
+                { confirmText: '通过', tone: 'primary' },
+              )
+            }
             className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
           >
             审核通过
@@ -207,36 +228,64 @@ function OverviewTab({
         )}
         <button
           disabled={isSelf}
-          onClick={() => handleAction(
-            user.status === 'active' ? '禁用用户' : '启用用户',
-            user.status === 'active' ? `禁用 ${user.username}？已有 session 会被强制下线。` : `启用 ${user.username}？`,
-            () => updateUser(user.id, { status: user.status === 'active' ? 'disabled' : 'active' }),
-          )}
-          className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
+          onClick={() =>
+            handleAction(
+              user.status === 'active' ? '禁用用户' : '启用用户',
+              user.status === 'active'
+                ? `禁用 ${user.username}？已有 session 会被强制下线。`
+                : `启用 ${user.username}？`,
+              () => updateUser(user.id, { status: user.status === 'active' ? 'disabled' : 'active' }),
+              {
+                confirmText: user.status === 'active' ? '禁用' : '启用',
+                tone: user.status === 'active' ? 'warning' : 'primary',
+              },
+            )
+          }
+          className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {user.status === 'active' ? '禁用' : '启用'}
         </button>
         <button
           disabled={isSelf}
-          onClick={() => handleAction(
-            user.role === 'admin' ? '降级管理员' : '提升为管理员',
-            user.role === 'admin' ? `降级 ${user.username} 为普通用户？` : `提升 ${user.username} 为管理员？`,
-            () => updateUser(user.id, { role: user.role === 'admin' ? 'user' : 'admin' }),
-          )}
-          className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
+          onClick={() =>
+            handleAction(
+              user.role === 'admin' ? '降级管理员' : '提升为管理员',
+              user.role === 'admin' ? `降级 ${user.username} 为普通用户？` : `提升 ${user.username} 为管理员？`,
+              () => updateUser(user.id, { role: user.role === 'admin' ? 'user' : 'admin' }),
+              {
+                confirmText: user.role === 'admin' ? '降级' : '提升',
+                tone: user.role === 'admin' ? 'warning' : 'primary',
+              },
+            )
+          }
+          className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {user.role === 'admin' ? '降级为普通用户' : '提升为管理员'}
         </button>
         <button
-          onClick={() => handleAction('强制下线', `强制下线 ${user.username} 的所有会话？`, () => forceLogoutUser(user.id))}
+          onClick={() =>
+            handleAction(
+              '强制下线',
+              `强制下线 ${user.username} 的所有会话？`,
+              () => forceLogoutUser(user.id),
+              { confirmText: '强制下线', tone: 'warning' },
+            )
+          }
           className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
         >
           强制下线
         </button>
         <button
           disabled={isSelf}
-          onClick={() => handleAction('删除用户', `删除 ${user.username}？该用户的全部任务和图片将被软删除。`, () => deleteUser(user.id))}
-          className="px-3 py-1.5 text-sm rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 disabled:opacity-40"
+          onClick={() =>
+            handleAction(
+              '删除用户',
+              `删除 ${user.username}？该用户的全部任务和图片将被软删除。`,
+              () => deleteUser(user.id),
+              { confirmText: '删除用户', tone: 'danger' },
+            )
+          }
+          className="px-3 py-1.5 text-sm rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           删除
         </button>
@@ -359,6 +408,8 @@ function ProfilesTab({ userId }: { userId: number }) {
     setConfirmDialog({
       title: '删除 Profile',
       message: `删除 Profile "${p.name}"？`,
+      confirmText: '删除',
+      tone: 'danger',
       action: async () => {
         try {
           await deleteUserProfile(userId, p.id)
@@ -519,8 +570,9 @@ function ProfileEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
-      <div className="w-full max-w-xl bg-white dark:bg-gray-950 rounded-xl shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 animate-overlay-in" onClick={onClose} />
+      <div className="relative w-full max-w-xl bg-white dark:bg-gray-950 rounded-xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 p-5 max-h-[90vh] overflow-y-auto animate-modal-in">
         <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
           {profile ? '编辑 Profile' : '新增 Profile'}
         </h3>
@@ -628,6 +680,8 @@ function ProvidersTab({ userId }: { userId: number }) {
     setConfirmDialog({
       title: '删除 Custom Provider',
       message: `删除 "${p.name}"？`,
+      confirmText: '删除',
+      tone: 'danger',
       action: async () => {
         try {
           await deleteUserCustomProvider(userId, p.id)
@@ -787,8 +841,9 @@ function CustomProviderEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
-      <div className="w-full max-w-xl bg-white dark:bg-gray-950 rounded-xl shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 animate-overlay-in" onClick={onClose} />
+      <div className="relative w-full max-w-xl bg-white dark:bg-gray-950 rounded-xl shadow-xl ring-1 ring-black/5 dark:ring-white/10 p-5 max-h-[90vh] overflow-y-auto animate-modal-in">
         <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
           {provider ? '编辑 Custom Provider' : '新增 Custom Provider'}
         </h3>

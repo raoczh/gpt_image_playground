@@ -100,10 +100,10 @@ export default function ConfigPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-4">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">注册控制</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
             <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">注册模式</span>
             <select
@@ -154,7 +154,7 @@ export default function ConfigPage() {
 
       <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-4">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">配额</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
             <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">每日生成次数限制（留空不限）</span>
             <input
@@ -180,8 +180,24 @@ export default function ConfigPage() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">公告横幅</h2>
+      <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">公告横幅</h2>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const v = JSON.parse(announcementJson || 'null')
+                setAnnouncementJson(JSON.stringify(v, null, 2))
+              } catch {
+                showToast('JSON 格式无效，无法格式化', 'error')
+              }
+            }}
+            className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
+          >
+            格式化
+          </button>
+        </div>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           JSON 格式：{`{ "enabled": true, "level": "info|warning|error", "content": "...", "id": "唯一标识", "expires_at": null }`}
           <br />设为 null 关闭公告。
@@ -189,31 +205,57 @@ export default function ConfigPage() {
         <textarea
           value={announcementJson}
           onChange={(e) => setAnnouncementJson(e.target.value)}
-          rows={5}
+          rows={6}
           className="form-input font-mono"
+          spellCheck={false}
         />
       </div>
 
-      <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">新用户默认 Profile</h2>
+      <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-white/[0.08] p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">新用户默认 Profile</h2>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const v = JSON.parse(defaultProfileJson || 'null')
+                setDefaultProfileJson(JSON.stringify(v, null, 2))
+              } catch {
+                showToast('JSON 格式无效，无法格式化', 'error')
+              }
+            }}
+            className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
+          >
+            格式化
+          </button>
+        </div>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           新用户注册成功后自动创建的 API Profile（JSON 对象或 null）。
         </p>
         <textarea
           value={defaultProfileJson}
           onChange={(e) => setDefaultProfileJson(e.target.value)}
-          rows={6}
+          rows={7}
           className="form-input font-mono"
+          spellCheck={false}
         />
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="px-5 py-2 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 disabled:opacity-40"
-      >
-        {saving ? '保存中...' : '保存全部配置'}
-      </button>
+      <div className="sticky bottom-0 -mx-4 px-4 py-3 bg-gradient-to-t from-gray-50 via-gray-50/90 to-transparent dark:from-gray-950 dark:via-gray-950/90 backdrop-blur-sm">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full md:w-auto px-5 py-2 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors inline-flex items-center justify-center gap-2"
+        >
+          {saving && (
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          )}
+          {saving ? '保存中…' : '保存全部配置'}
+        </button>
+      </div>
     </div>
   )
 }

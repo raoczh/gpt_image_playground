@@ -48,6 +48,8 @@ export default function AllowlistPage() {
     setConfirmDialog({
       title: '移除白名单',
       message: `从注册白名单中移除 ${item.github_username}？`,
+      confirmText: '移除',
+      tone: 'danger',
       action: async () => {
         try {
           await removeAllowlist(item.id)

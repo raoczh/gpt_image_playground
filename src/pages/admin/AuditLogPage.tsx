@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import { listAuditLog, type AuditLogEntry } from '../../lib/adminApi'
 import { useStore } from '../../store'
 
@@ -168,8 +168,8 @@ export default function AuditLogPage() {
             {items.map((it) => {
               const isOpen = expanded.has(it.id)
               return (
-                <>
-                  <tr key={it.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/50">
+                <Fragment key={it.id}>
+                  <tr className="hover:bg-gray-50 dark:hover:bg-gray-900/50">
                     <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">{formatDate(it.created_at)}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5">
@@ -189,7 +189,7 @@ export default function AuditLogPage() {
                       {(it.before_value || it.after_value) ? (
                         <button
                           onClick={() => toggleExpand(it.id)}
-                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
+                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
                         >
                           {isOpen ? '收起' : '展开'}
                         </button>
@@ -199,7 +199,7 @@ export default function AuditLogPage() {
                     </td>
                   </tr>
                   {isOpen && (
-                    <tr key={`${it.id}-detail`} className="bg-gray-50 dark:bg-gray-900/30">
+                    <tr className="bg-gray-50 dark:bg-gray-900/30">
                       <td colSpan={6} className="px-3 py-3">
                         <div className="grid grid-cols-2 gap-3 text-xs">
                           <div>
@@ -223,7 +223,7 @@ export default function AuditLogPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               )
             })}
           </tbody>

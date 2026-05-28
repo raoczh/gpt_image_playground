@@ -129,8 +129,6 @@ function MainApp() {
       <DetailModal />
       <Lightbox />
       <SettingsModal />
-      <ConfirmDialog />
-      <Toast />
       <ImageContextMenu />
       <MaskEditorModal />
     </>
@@ -164,51 +162,57 @@ export default function App() {
   }, [setUser, setAuthLoading])
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/maintenance" element={<MaintenancePage />} />
-      <Route element={<StatusGuard />}>
-        <Route
-          path="/pending"
-          element={
-            <AuthGuard>
-              <PendingPage />
-            </AuthGuard>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <AuthGuard>
-              <AdminGuard />
-            </AuthGuard>
-          }
-        >
+    <>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
+        <Route element={<StatusGuard />}>
           <Route
+            path="/pending"
             element={
-              <Suspense fallback={<AuthLoadingFallback />}>
-                <AdminLayout />
-              </Suspense>
+              <AuthGuard>
+                <PendingPage />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <AuthGuard>
+                <AdminGuard />
+              </AuthGuard>
             }
           >
-            <Route index element={<Navigate to="stats" replace />} />
-            <Route path="stats" element={<StatsPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="users/:id/tasks" element={<UserTasksPage />} />
-            <Route path="allowlist" element={<AllowlistPage />} />
-            <Route path="audit" element={<AuditLogPage />} />
-            <Route path="config" element={<ConfigPage />} />
+            <Route
+              element={
+                <Suspense fallback={<AuthLoadingFallback />}>
+                  <AdminLayout />
+                </Suspense>
+              }
+            >
+              <Route index element={<Navigate to="stats" replace />} />
+              <Route path="stats" element={<StatsPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="users/:id/tasks" element={<UserTasksPage />} />
+              <Route path="allowlist" element={<AllowlistPage />} />
+              <Route path="audit" element={<AuditLogPage />} />
+              <Route path="config" element={<ConfigPage />} />
+            </Route>
           </Route>
+          <Route
+            path="*"
+            element={
+              <AuthGuard>
+                <MainApp />
+              </AuthGuard>
+            }
+          />
         </Route>
-        <Route
-          path="*"
-          element={
-            <AuthGuard>
-              <MainApp />
-            </AuthGuard>
-          }
-        />
-      </Route>
-    </Routes>
+      </Routes>
+      {/* 全局 UI（Toast / 确认弹窗）放在 Routes 外，保证任何路由都能弹出，
+          否则 admin 页面调用 setConfirmDialog/showToast 时不会立即显示。 */}
+      <ConfirmDialog />
+      <Toast />
+    </>
   )
 }

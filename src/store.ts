@@ -174,7 +174,13 @@ interface AppState {
   confirmDialog: {
     title: string
     message: string
-    action: () => void
+    action: () => void | Promise<void>
+    /** 确认按钮文案，默认 "确认" */
+    confirmText?: string
+    /** 取消按钮文案，默认 "取消" */
+    cancelText?: string
+    /** 按钮风格：danger=红色（默认，破坏性操作）；primary=深色（中性确认）；warning=橙色 */
+    tone?: 'danger' | 'primary' | 'warning'
   } | null
   setConfirmDialog: (d: AppState['confirmDialog']) => void
 }

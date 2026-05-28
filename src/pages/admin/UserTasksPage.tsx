@@ -109,6 +109,8 @@ export default function UserTasksPage() {
     setConfirmDialog({
       title: '删除任务',
       message: `删除该任务？该任务的关联图片若不再被引用也会被软删除。`,
+      confirmText: '删除',
+      tone: 'danger',
       action: async () => {
         try {
           await backendApi.deleteTask(task.id)
@@ -127,6 +129,8 @@ export default function UserTasksPage() {
     setConfirmDialog({
       title: '批量删除',
       message: `删除选中的 ${ids.length} 条任务？`,
+      confirmText: `全部删除`,
+      tone: 'danger',
       action: async () => {
         try {
           await backendApi.batchDeleteTasks(ids)
@@ -147,6 +151,14 @@ export default function UserTasksPage() {
       else next.add(id)
       return next
     })
+  }
+
+  const allSelected = tasks.length > 0 && selected.size === tasks.length
+  const someSelected = selected.size > 0 && selected.size < tasks.length
+
+  const toggleSelectAll = () => {
+    if (allSelected) setSelected(new Set())
+    else setSelected(new Set(tasks.map((t) => t.id)))
   }
 
   return (
@@ -219,7 +231,19 @@ export default function UserTasksPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/50 text-xs text-gray-500 dark:text-gray-400 uppercase">
               <tr>
-                <th className="px-3 py-2 w-8"></th>
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected
+                    }}
+                    onChange={toggleSelectAll}
+                    disabled={tasks.length === 0}
+                    aria-label={allSelected ? '取消全选' : '全选当前页'}
+                    title={allSelected ? '取消全选' : '全选当前页'}
+                  />
+                </th>
                 <th className="px-3 py-2 text-left">缩略图</th>
                 <th className="px-3 py-2 text-left">提示词</th>
                 <th className="px-3 py-2 text-left">状态</th>

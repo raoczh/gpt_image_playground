@@ -129,6 +129,8 @@ export default function UsersPage() {
     setConfirmDialog({
       title: '删除用户',
       message: `确定删除用户 ${u.username}？该用户的全部任务和图片将被软删除。`,
+      confirmText: '删除用户',
+      tone: 'danger',
       action: async () => {
         try {
           await deleteUser(u.id)
@@ -141,13 +143,21 @@ export default function UsersPage() {
     })
   }
 
-  const handleForceLogout = async (u: AdminUser) => {
-    try {
-      await forceLogoutUser(u.id)
-      showToast('已强制下线', 'success')
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), 'error')
-    }
+  const handleForceLogout = (u: AdminUser) => {
+    setConfirmDialog({
+      title: '强制下线',
+      message: `强制下线 ${u.username} 的所有会话？`,
+      confirmText: '强制下线',
+      tone: 'warning',
+      action: async () => {
+        try {
+          await forceLogoutUser(u.id)
+          showToast('已强制下线', 'success')
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err), 'error')
+        }
+      },
+    })
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -170,7 +180,7 @@ export default function UsersPage() {
                 }
               }}
               placeholder="用户名 / 邮箱 / GitHub ID"
-              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 dark:border-white/[0.1] bg-white dark:bg-gray-950 text-sm"
+              className="form-input"
             />
           </div>
           <div>
@@ -181,7 +191,7 @@ export default function UsersPage() {
                 setStatusFilter(e.target.value as typeof statusFilter)
                 setOffset(0)
               }}
-              className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-white/[0.1] bg-white dark:bg-gray-950 text-sm"
+              className="form-input min-w-[120px]"
             >
               <option value="">全部</option>
               <option value="active">正常</option>
@@ -197,7 +207,7 @@ export default function UsersPage() {
                 setRoleFilter(e.target.value as typeof roleFilter)
                 setOffset(0)
               }}
-              className="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-white/[0.1] bg-white dark:bg-gray-950 text-sm"
+              className="form-input min-w-[120px]"
             >
               <option value="">全部</option>
               <option value="user">普通用户</option>
@@ -209,10 +219,30 @@ export default function UsersPage() {
               setOffset(0)
               load()
             }}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+            disabled={loading}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 disabled:opacity-40 transition-colors inline-flex items-center gap-1.5"
           >
+            {loading && (
+              <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
             搜索
           </button>
+          {(q || statusFilter || roleFilter) && (
+            <button
+              onClick={() => {
+                setQ('')
+                setStatusFilter('')
+                setRoleFilter('')
+                setOffset(0)
+              }}
+              className="px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              重置
+            </button>
+          )}
         </div>
       </div>
 
@@ -245,16 +275,31 @@ export default function UsersPage() {
               )}
               {!loading && users.map((u) => {
                 const sl = statusLabel[u.status]
+                const isSelf = u.id === me?.id
                 return (
-                  <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/50">
+                  <tr
+                    key={u.id}
+                    className={`transition-colors ${
+                      isSelf
+                        ? 'bg-amber-50/50 dark:bg-amber-500/[0.06] hover:bg-amber-50 dark:hover:bg-amber-500/10'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-900/50'
+                    }`}
+                  >
                     <td className="px-3 py-2">
                       <button
                         onClick={() => setDrawerUserId(u.id)}
-                        className="flex items-center gap-2 text-left"
+                        className="flex items-center gap-2 text-left group"
                       >
                         <img src={u.avatar_url} alt="" className="w-7 h-7 rounded-full" />
                         <div>
-                          <div className="font-medium text-gray-800 dark:text-gray-100">{u.username}</div>
+                          <div className="font-medium text-gray-800 dark:text-gray-100 group-hover:underline flex items-center gap-1.5">
+                            {u.username}
+                            {isSelf && (
+                              <span className="px-1 py-px text-[10px] rounded bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+                                你
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-gray-500 dark:text-gray-400">{u.email || `id:${u.github_id}`}</div>
                         </div>
                       </button>
@@ -278,39 +323,43 @@ export default function UsersPage() {
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{formatDate(u.last_login_at)}</td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap">{formatDate(u.created_at)}</td>
                     <td className="px-3 py-2">
-                      <div className="flex justify-end gap-1 flex-wrap">
+                      <div className="flex justify-end gap-1 flex-wrap items-center">
                         {u.status === 'pending' && (
                           <button
                             onClick={() => handleApprove(u)}
-                            className="px-2 py-0.5 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                            className="px-2 py-0.5 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
                           >
                             通过
                           </button>
                         )}
                         <button
                           onClick={() => handleToggleStatus(u)}
-                          disabled={u.id === me?.id}
-                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          disabled={isSelf}
+                          title={isSelf ? '不能修改自己的状态' : ''}
+                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {u.status === 'active' ? '禁用' : '启用'}
                         </button>
                         <button
                           onClick={() => handleToggleRole(u)}
-                          disabled={u.id === me?.id}
-                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          disabled={isSelf}
+                          title={isSelf ? '不能修改自己的角色' : ''}
+                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {u.role === 'admin' ? '降级' : '提升'}
                         </button>
                         <button
                           onClick={() => handleForceLogout(u)}
-                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
+                          className="px-2 py-0.5 text-xs rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
                         >
                           下线
                         </button>
+                        <span className="w-px h-4 bg-gray-200 dark:bg-white/[0.08] mx-0.5" aria-hidden />
                         <button
                           onClick={() => handleDelete(u)}
-                          disabled={u.id === me?.id}
-                          className="px-2 py-0.5 text-xs rounded bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                          disabled={isSelf}
+                          title={isSelf ? '不能删除自己' : ''}
+                          className="px-2 py-0.5 text-xs rounded bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           删除
                         </button>
