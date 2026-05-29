@@ -4,7 +4,7 @@ import db from '../db.js';
 // helper：返回 { ownerId, isAdminAccess } 或 null
 export async function assertTaskAccess(taskId, req) {
   const [rows] = await db.query(
-    'SELECT user_id FROM tasks WHERE id = ? AND deleted_at IS NULL',
+    'SELECT user_id FROM tasks WHERE id = ?',
     [taskId]
   );
   if (!rows.length) return null;
@@ -17,7 +17,7 @@ export async function assertTaskAccess(taskId, req) {
 
 export async function assertImageAccess(imageId, req) {
   const [rows] = await db.query(
-    'SELECT user_id FROM images WHERE id = ? AND deleted_at IS NULL',
+    'SELECT user_id FROM images WHERE id = ?',
     [imageId]
   );
   if (!rows.length) return null;

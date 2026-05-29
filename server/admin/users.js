@@ -1,6 +1,7 @@
 import express from 'express';
 import { invalidateUserCache } from '../auth.js';
 import { logAudit } from '../audit.js';
+import { deleteTasksAndUnreferencedImages, deleteUnreferencedImages } from '../services/imageStorage.js';
 
 export default function createAdminUsersRouter(db, deps = {}) {
   const router = express.Router();
@@ -82,9 +83,9 @@ export default function createAdminUsersRouter(db, deps = {}) {
       const sql = `
         SELECT u.id, u.github_id, u.username, u.avatar_url, u.email, u.role, u.status,
                u.last_login_at, u.created_at, u.updated_at, u.quota_overrides,
-               (SELECT COUNT(*) FROM tasks t WHERE t.user_id = u.id AND t.deleted_at IS NULL) AS task_count,
-               (SELECT COUNT(*) FROM images i WHERE i.user_id = u.id AND i.deleted_at IS NULL) AS image_count,
-               (SELECT COALESCE(SUM(i.file_size), 0) FROM images i WHERE i.user_id = u.id AND i.deleted_at IS NULL) AS storage_bytes
+               (SELECT COUNT(*) FROM tasks t WHERE t.user_id = u.id) AS task_count,
+               (SELECT COUNT(*) FROM images i WHERE i.user_id = u.id) AS image_count,
+               (SELECT COALESCE(SUM(i.file_size), 0) FROM images i WHERE i.user_id = u.id) AS storage_bytes
         FROM users u
         WHERE ${where.join(' AND ')}
         ORDER BY u.created_at DESC, u.id DESC
@@ -121,9 +122,9 @@ export default function createAdminUsersRouter(db, deps = {}) {
       const [rows] = await db.query(
         `SELECT u.id, u.github_id, u.username, u.avatar_url, u.email, u.role, u.status,
                 u.last_login_at, u.created_at, u.updated_at, u.quota_overrides,
-                (SELECT COUNT(*) FROM tasks t WHERE t.user_id = u.id AND t.deleted_at IS NULL) AS task_count,
-                (SELECT COUNT(*) FROM images i WHERE i.user_id = u.id AND i.deleted_at IS NULL) AS image_count,
-                (SELECT COALESCE(SUM(i.file_size), 0) FROM images i WHERE i.user_id = u.id AND i.deleted_at IS NULL) AS storage_bytes
+                (SELECT COUNT(*) FROM tasks t WHERE t.user_id = u.id) AS task_count,
+                (SELECT COUNT(*) FROM images i WHERE i.user_id = u.id) AS image_count,
+                (SELECT COALESCE(SUM(i.file_size), 0) FROM images i WHERE i.user_id = u.id) AS storage_bytes
          FROM users u WHERE u.id = ? AND u.deleted_at IS NULL`,
         [id]
       );
@@ -253,8 +254,13 @@ export default function createAdminUsersRouter(db, deps = {}) {
         ['disabled', id]
       );
 
-      await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [id]);
-      await db.query('UPDATE images SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [id]);
+      const [taskRows] = await db.query(
+        'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE user_id = ?',
+        [id]
+      );
+      await deleteTasksAndUnreferencedImages(taskRows);
+      const [imageRows] = await db.query('SELECT id FROM images WHERE user_id = ?', [id]);
+      await deleteUnreferencedImages(imageRows.map((row) => row.id));
 
       invalidateUserCache(id);
       destroyUserSessions(id).catch(() => {});

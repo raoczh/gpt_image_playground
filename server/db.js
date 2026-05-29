@@ -116,23 +116,6 @@ async function initDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务记录表'
     `);
 
-    // 检查并添加 deleted_at 字段（自动迁移）
-    const [columns] = await connection.query(`
-      SELECT COLUMN_NAME
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'deleted_at'
-    `, [process.env.DB_NAME || 'gpt-image']);
-
-    if (columns.length === 0) {
-      console.log('  📝 Adding deleted_at column to tasks table...');
-      await connection.query(`
-        ALTER TABLE tasks
-        ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER finished_at,
-        ADD INDEX idx_deleted_at (deleted_at)
-      `);
-      console.log('  ✅ Added deleted_at column');
-    }
-
     // 创建图片表
     await connection.query(`
       CREATE TABLE IF NOT EXISTS images (
@@ -154,23 +137,6 @@ async function initDatabase() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片表'
     `);
-
-    // 检查并添加 images 表的 deleted_at 字段
-    const [imageColumns] = await connection.query(`
-      SELECT COLUMN_NAME
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'images' AND COLUMN_NAME = 'deleted_at'
-    `, [process.env.DB_NAME || 'gpt-image']);
-
-    if (imageColumns.length === 0) {
-      console.log('  📝 Adding deleted_at column to images table...');
-      await connection.query(`
-        ALTER TABLE images
-        ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）' AFTER height,
-        ADD INDEX idx_deleted_at (deleted_at)
-      `);
-      console.log('  ✅ Added deleted_at column to images');
-    }
 
     // 检查并添加 images 表的 thumb_path / thumb_url 字段
     const [thumbColumns] = await connection.query(`

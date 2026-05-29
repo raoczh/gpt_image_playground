@@ -1,12 +1,16 @@
 import path from 'path';
 import fs from 'fs/promises';
 import db from '../db.js';
-import { writeThumbnail } from '../services/imageStorage.js';
+import {
+  deleteImageRowsAndFiles,
+  deleteTasksAndUnreferencedImages,
+  writeThumbnail,
+} from '../services/imageStorage.js';
 
 // 启动时为历史图片补缩略图（thumb_url IS NULL），并发限制 4
 async function backfillThumbnails() {
   const [rows] = await db.query(
-    "SELECT id, file_path FROM images WHERE thumb_url IS NULL AND deleted_at IS NULL"
+    'SELECT id, file_path FROM images WHERE thumb_url IS NULL'
   );
   if (rows.length === 0) {
     console.log(`[${new Date().toISOString()}] 🖼️  Thumbnail backfill: nothing to do`);
@@ -38,49 +42,87 @@ async function backfillThumbnails() {
   console.log(`[${new Date().toISOString()}] ✅ Backfill done: ${ok} success, ${fail} failed`);
 }
 
-// 物理清理：把 deleted_at 超过 SOFT_DELETE_RETAIN_DAYS 天的 images 行真正删除并清磁盘文件，
-// 同时硬删过期的 tasks 行。失败单条跳过、记日志，不抛错（被定时器 catch 即可）。
-const SOFT_DELETE_RETAIN_DAYS = 30;
-const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const ERROR_TASK_RETAIN_DAYS = 5;
+const NORMAL_TASK_RETAIN_DAYS = 15;
 
-async function cleanupSoftDeleted() {
-  // 1) 物理清理图片
-  const [imgRows] = await db.query(
-    'SELECT id, file_path, thumb_path FROM images WHERE deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)',
-    [SOFT_DELETE_RETAIN_DAYS]
+async function columnExists(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [tableName, columnName]
   );
-  if (imgRows.length === 0) {
-    console.log(`[${new Date().toISOString()}] 🧹 Image cleanup: nothing to do`);
-  } else {
-    console.log(`[${new Date().toISOString()}] 🧹 Purging ${imgRows.length} images soft-deleted > ${SOFT_DELETE_RETAIN_DAYS}d...`);
-    let ok = 0;
-    let fail = 0;
-    for (const row of imgRows) {
-      try {
-        await fs.unlink(row.file_path).catch(() => {});
-        if (row.thumb_path) await fs.unlink(row.thumb_path).catch(() => {});
-        await db.query('DELETE FROM images WHERE id = ?', [row.id]);
-        ok++;
-      } catch (err) {
-        console.error(`[${new Date().toISOString()}] ⚠️  Image purge failed for ${row.id}: ${err.message}`);
-        fail++;
-      }
+  return rows.length > 0;
+}
+
+async function dropColumnIndexes(tableName, columnName) {
+  const [rows] = await db.query(
+    `SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? AND INDEX_NAME <> 'PRIMARY'`,
+    [tableName, columnName]
+  );
+  for (const row of rows) {
+    try {
+      await db.query(`ALTER TABLE ${tableName} DROP INDEX ${row.INDEX_NAME}`);
+    } catch (err) {
+      console.warn(`[${new Date().toISOString()}] ⚠️  Drop index ${tableName}.${row.INDEX_NAME} failed: ${err.message}`);
     }
-    console.log(`[${new Date().toISOString()}] ✅ Image purge done: ${ok} purged, ${fail} failed`);
-  }
-
-  // 2) 硬删过期任务行（无物理文件，单条 SQL）
-  const [taskResult] = await db.query(
-    'DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)',
-    [SOFT_DELETE_RETAIN_DAYS]
-  );
-  if (taskResult.affectedRows > 0) {
-    console.log(`[${new Date().toISOString()}] 🧹 Purged ${taskResult.affectedRows} task rows soft-deleted > ${SOFT_DELETE_RETAIN_DAYS}d`);
   }
 }
 
-// 启动时扫一次磁盘孤儿文件：磁盘上有但 DB 完全没记录（包括软删行）的文件直接 unlink。
-// 与 cleanupSoftDeleted 职责分工：后者按 30 天保留期清"软删超期"的 DB 行+文件；
+async function dropColumnIfExists(tableName, columnName) {
+  if (!(await columnExists(tableName, columnName))) return;
+  await dropColumnIndexes(tableName, columnName);
+  await db.query(`ALTER TABLE ${tableName} DROP COLUMN ${columnName}`);
+  console.log(`[${new Date().toISOString()}] 🧹 Dropped legacy ${tableName}.${columnName}`);
+}
+
+// 启动时迁移旧软删除数据：先物理清理遗留记录，再移除 tasks/images.deleted_at 列。
+async function cleanupLegacySoftDeletedAndDropColumns() {
+  const hasTaskDeletedAt = await columnExists('tasks', 'deleted_at');
+  if (hasTaskDeletedAt) {
+    const [taskRows] = await db.query(
+      'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE deleted_at IS NOT NULL'
+    );
+    if (taskRows.length > 0) {
+      const result = await deleteTasksAndUnreferencedImages(taskRows);
+      console.log(`[${new Date().toISOString()}] 🧹 Removed ${result.deletedTaskCount} legacy soft-deleted task(s), ${result.images.deleted} image(s)`);
+    }
+  }
+
+  const hasImageDeletedAt = await columnExists('images', 'deleted_at');
+  if (hasImageDeletedAt) {
+    const [imageRows] = await db.query(
+      'SELECT id, file_path, thumb_path FROM images WHERE deleted_at IS NOT NULL'
+    );
+    if (imageRows.length > 0) {
+      const result = await deleteImageRowsAndFiles(imageRows);
+      console.log(`[${new Date().toISOString()}] 🧹 Removed ${result.deleted} legacy soft-deleted image(s)`);
+    }
+  }
+
+  await dropColumnIfExists('tasks', 'deleted_at');
+  await dropColumnIfExists('images', 'deleted_at');
+}
+
+async function cleanupOldTasks() {
+  const [taskRows] = await db.query(
+    `SELECT id, input_image_ids, output_image_ids FROM tasks
+     WHERE COALESCE(is_favorite, 0) = 0
+       AND (
+         (status = 'error' AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY))
+         OR (status <> 'error' AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY))
+       )`,
+    [ERROR_TASK_RETAIN_DAYS, NORMAL_TASK_RETAIN_DAYS]
+  );
+  if (taskRows.length === 0) {
+    console.log(`[${new Date().toISOString()}] 🧹 Old task cleanup: nothing to do`);
+    return;
+  }
+  const result = await deleteTasksAndUnreferencedImages(taskRows);
+  console.log(`[${new Date().toISOString()}] 🧹 Removed ${result.deletedTaskCount} old task(s), ${result.images.deleted} unreferenced image(s)`);
+}
+
+// 启动时扫一次磁盘孤儿文件：磁盘上有但 DB 完全没记录的文件直接 unlink。
 // 本函数清"DB 从未引用过"的真孤儿（来自部分失败、历史脏数据、手动放进的文件等）。
 async function cleanupOrphanFiles() {
   const uploadDir = process.env.IMAGE_UPLOAD_DIR || '/data/images';
@@ -99,8 +141,7 @@ async function cleanupOrphanFiles() {
     return;
   }
 
-  // 有效集合 = DB 中所有行引用过的 file_path / thumb_path，不区分 deleted_at
-  // （软删行在 30 天保留期内仍然要保留物理文件，由 cleanupSoftDeleted 处理）
+  // 有效集合 = DB 中所有行引用过的 file_path / thumb_path。
   const [rows] = await db.query('SELECT file_path, thumb_path FROM images');
   const validPaths = new Set();
   for (const row of rows) {
@@ -147,7 +188,6 @@ async function cleanupStuckTasks() {
          error_message = COALESCE(error_message, ?),
          finished_at = COALESCE(finished_at, UNIX_TIMESTAMP(NOW()) * 1000)
      WHERE status = 'running'
-       AND deleted_at IS NULL
        AND started_at < (UNIX_TIMESTAMP(NOW()) * 1000 - ? * 60 * 1000)`,
     ['生成超时（服务端检测）', STUCK_TASK_TIMEOUT_MIN]
   );
@@ -156,12 +196,33 @@ async function cleanupStuckTasks() {
   }
 }
 
+function scheduleNextMidnightCleanup() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  const delay = Math.max(1000, next.getTime() - now.getTime());
+  const timer = setTimeout(async () => {
+    try {
+      await cleanupOldTasks();
+      await cleanupOrphanFiles();
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] ❌ Midnight cleanup error:`, err.message);
+    } finally {
+      scheduleNextMidnightCleanup();
+    }
+  }, delay);
+  if (typeof timer.unref === 'function') timer.unref();
+  console.log(`[${new Date().toISOString()}] 🕛 Next cleanup scheduled at ${next.toLocaleString()}`);
+  return timer;
+}
+
 
 export {
   backfillThumbnails,
-  cleanupSoftDeleted,
+  cleanupLegacySoftDeletedAndDropColumns,
+  cleanupOldTasks,
   cleanupOrphanFiles,
   cleanupStuckTasks,
-  CLEANUP_INTERVAL_MS,
+  scheduleNextMidnightCleanup,
   STUCK_TASK_CHECK_INTERVAL_MS,
 };

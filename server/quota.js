@@ -33,7 +33,7 @@ async function resolveLimit(userId, key) {
 export async function getDailyGenerationCount(userId) {
   const [rows] = await db.query(
     `SELECT COUNT(*) AS c FROM tasks
-     WHERE user_id = ? AND deleted_at IS NULL AND created_at >= CURDATE()`,
+     WHERE user_id = ? AND created_at >= CURDATE()`,
     [userId]
   );
   return Number(rows[0]?.c || 0);
@@ -42,7 +42,7 @@ export async function getDailyGenerationCount(userId) {
 export async function getUserStorageBytes(userId) {
   const [rows] = await db.query(
     `SELECT COALESCE(SUM(file_size), 0) AS total FROM images
-     WHERE user_id = ? AND deleted_at IS NULL`,
+     WHERE user_id = ?`,
     [userId]
   );
   return Number(rows[0]?.total || 0);

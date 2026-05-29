@@ -45,14 +45,12 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `output_image_sizes` JSON NULL COMMENT '输出图片尺寸 [{w,h},...]',
   `started_at` BIGINT NOT NULL COMMENT '开始时间戳',
   `finished_at` BIGINT COMMENT '完成时间戳',
-  `deleted_at` TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_status` (`status`),
   INDEX `idx_favorite` (`is_favorite`),
   INDEX `idx_created_at` (`created_at`),
-  INDEX `idx_deleted_at` (`deleted_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务记录表';
 
@@ -104,12 +102,10 @@ CREATE TABLE IF NOT EXISTS `images` (
   `source` ENUM('upload', 'generated') DEFAULT 'upload' COMMENT '来源',
   `width` INT COMMENT '图片宽度',
   `height` INT COMMENT '图片高度',
-  `deleted_at` TIMESTAMP NULL DEFAULT NULL COMMENT '删除时间（逻辑删除）',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_source` (`source`),
   INDEX `idx_created_at` (`created_at`),
-  INDEX `idx_deleted_at` (`deleted_at`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图片表';
 

@@ -3,7 +3,7 @@ import db from '../db.js';
 import { requireAuth } from '../auth.js';
 import { checkDailyGenerationQuota, checkStorageQuota } from '../quota.js';
 import { callUpstreamImageApi, friendlyUpstreamMessage } from '../services/upstreamImageApi.js';
-import { saveGeneratedImageBytes } from '../services/imageStorage.js';
+import { deleteUnreferencedImages, saveGeneratedImageBytes } from '../services/imageStorage.js';
 import { formatBytes, logBox, truncateForLog } from '../services/logging.js';
 
 const app = express.Router();
@@ -51,12 +51,9 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     // 存储配额事后兜底：本次生成把用户推过上限就回滚刚落盘的图片
     const storagePostCheck = await checkStorageQuota(req.session.userId, 0);
     if (!storagePostCheck.ok) {
-      const justSavedIds = saved.map((s) => s.id).filter(Boolean);
+      const justSavedIds = saved.filter((s) => s.isNew).map((s) => s.id).filter(Boolean);
       if (justSavedIds.length > 0) {
-        await db.query(
-          'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ?',
-          [justSavedIds, req.session.userId]
-        ).catch(() => {});
+        await deleteUnreferencedImages(justSavedIds).catch(() => {});
       }
       return res.status(429).json({ error: storagePostCheck.message, code: storagePostCheck.code });
     }

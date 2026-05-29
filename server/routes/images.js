@@ -8,7 +8,7 @@ import { requireAuth } from '../auth.js';
 import { checkStorageQuota } from '../quota.js';
 import { logAudit } from '../audit.js';
 import { assertImageAccess } from '../services/access.js';
-import { probeImageDims, saveGeneratedImageBytes, writeThumbnail } from '../services/imageStorage.js';
+import { deleteImageIfUnreferenced, probeImageDims, saveGeneratedImageBytes, writeThumbnail } from '../services/imageStorage.js';
 
 const app = express.Router();
 
@@ -64,16 +64,10 @@ app.post('/api/images/upload', requireAuth, upload.single('image'), async (req, 
     const fileUrl = `${process.env.IMAGE_BASE_URL}/${req.file.filename}`;
 
     console.log(`[${new Date().toISOString()}] 🔍 Check existing image - ID: ${imageId}`);
-    const [existing] = await db.query('SELECT id, file_url, thumb_url, deleted_at FROM images WHERE id = ?', [imageId]);
+    const [existing] = await db.query('SELECT id, file_url, thumb_url FROM images WHERE id = ?', [imageId]);
 
     if (existing.length > 0) {
-      // 若图片之前被软删除，则恢复
-      if (existing[0].deleted_at) {
-        await db.query('UPDATE images SET deleted_at = NULL WHERE id = ?', [imageId]);
-        console.log(`[${new Date().toISOString()}] ♻️  Restored soft-deleted image - ID: ${imageId}`);
-      } else {
-        console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
-      }
+      console.log(`[${new Date().toISOString()}] ♻️  Image already exists, removing duplicate`);
       await fs.unlink(req.file.path).catch(() => {});
       return res.json({ id: imageId, url: existing[0].file_url, thumb: existing[0].thumb_url || '' });
     }
@@ -134,7 +128,7 @@ app.get('/api/images/:id', requireAuth, async (req, res) => {
     if (!access) return res.status(404).json({ error: 'Image not found' });
 
     const [rows] = await db.query(
-      'SELECT id, user_id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ? AND deleted_at IS NULL',
+      'SELECT id, user_id, file_url, file_size, mime_type, source, created_at FROM images WHERE id = ?',
       [id]
     );
 
@@ -155,10 +149,10 @@ app.delete('/api/images/:id', requireAuth, async (req, res) => {
     const access = await assertImageAccess(id, req);
     if (!access) return res.status(404).json({ error: 'Image not found' });
 
-    await db.query(
-      'UPDATE images SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL',
-      [id]
-    );
+    const deleted = await deleteImageIfUnreferenced(id);
+    if (!deleted) {
+      return res.status(409).json({ error: 'Image is still referenced by existing tasks' });
+    }
 
     if (access.isAdminAccess) {
       logAudit({

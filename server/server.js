@@ -16,10 +16,11 @@ import generateRouter from './routes/generate.js';
 import imagesRouter from './routes/images.js';
 import {
   backfillThumbnails,
-  cleanupSoftDeleted,
+  cleanupLegacySoftDeletedAndDropColumns,
+  cleanupOldTasks,
   cleanupOrphanFiles,
   cleanupStuckTasks,
-  CLEANUP_INTERVAL_MS,
+  scheduleNextMidnightCleanup,
   STUCK_TASK_CHECK_INTERVAL_MS,
 } from './jobs/cleanup.js';
 
@@ -76,23 +77,16 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[${new Date().toISOString()}] 📝 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`[${new Date().toISOString()}] 🔗 CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
   console.log(`[${new Date().toISOString()}] 🗄️  Redis: ${redisClient ? 'connected' : 'memory session'}`);
-  // 异步触发 backfill，不阻塞 listen；首次启动数据多时也不影响接收请求
-  backfillThumbnails().catch((err) => {
-    console.error(`[${new Date().toISOString()}] ❌ Backfill thumbnails error:`, err.message);
+  // 启动维护任务不阻塞 listen：清理旧软删除列/旧任务/孤儿文件，再补缩略图。
+  (async () => {
+    await cleanupLegacySoftDeletedAndDropColumns();
+    await cleanupOldTasks();
+    await cleanupOrphanFiles();
+    await backfillThumbnails();
+  })().catch((err) => {
+    console.error(`[${new Date().toISOString()}] ❌ Startup cleanup error:`, err.message);
   });
-  // 启动时清理一次过期软删除文件，并每 24h 重复
-  cleanupSoftDeleted().catch((err) => {
-    console.error(`[${new Date().toISOString()}] ❌ Cleanup soft-deleted error:`, err.message);
-  });
-  setInterval(() => {
-    cleanupSoftDeleted().catch((err) => {
-      console.error(`[${new Date().toISOString()}] ❌ Cleanup soft-deleted error:`, err.message);
-    });
-  }, CLEANUP_INTERVAL_MS);
-  // 启动时扫一次磁盘孤儿（DB 完全没记录的文件），只在启动时跑
-  cleanupOrphanFiles().catch((err) => {
-    console.error(`[${new Date().toISOString()}] ❌ Cleanup orphan files error:`, err.message);
-  });
+  scheduleNextMidnightCleanup();
   // 启动时 + 每小时检测 zombie task（running 超时），避免前端断网导致 task 永远停在 running
   cleanupStuckTasks().catch((err) => {
     console.error(`[${new Date().toISOString()}] ❌ Cleanup stuck tasks error:`, err.message);

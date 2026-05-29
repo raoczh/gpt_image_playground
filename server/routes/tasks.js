@@ -3,6 +3,7 @@ import db from '../db.js';
 import { requireAuth } from '../auth.js';
 import { logAudit } from '../audit.js';
 import { assertTaskAccess } from '../services/access.js';
+import { deleteTasksAndUnreferencedImages, parseImageIdArray } from '../services/imageStorage.js';
 
 const app = express.Router();
 
@@ -49,7 +50,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
     console.log(`[${new Date().toISOString()}] 📋 Get tasks - User: ${req.session.userId}, target=${allUsers ? 'all' : targetUserId}, q="${q}", status=${status}, limit=${limit}, cursor=${cursorTs ? 'yes' : 'no'}`);
 
-    const where = ['t.deleted_at IS NULL'];
+    const where = [];
     const params = [];
     if (!allUsers) {
       where.push('t.user_id = ?');
@@ -73,7 +74,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
 
     const sql = `SELECT t.*, u.username AS owner_username, u.avatar_url AS owner_avatar_url
                  FROM tasks t LEFT JOIN users u ON u.id = t.user_id
-                 WHERE ${where.join(' AND ')} ORDER BY t.created_at DESC, t.id DESC LIMIT ?`;
+                 ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY t.created_at DESC, t.id DESC LIMIT ?`;
     const [rows] = await db.query(sql, [...params, limit + 1]);
 
     const hasMore = rows.length > limit;
@@ -82,9 +83,11 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     console.log(`[${new Date().toISOString()}] 📊 Found ${pageRows.length} tasks (hasMore=${hasMore})`);
 
     const parsedRows = pageRows.map(task => {
-      const inputImageIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : task.input_image_ids;
-      const outputImageIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : task.output_image_ids;
-      return { task, inputImageIds: inputImageIds || [], outputImageIds: outputImageIds || [] };
+      return {
+        task,
+        inputImageIds: parseImageIdArray(task.input_image_ids),
+        outputImageIds: parseImageIdArray(task.output_image_ids),
+      };
     });
 
     const allImageIds = new Set();
@@ -96,7 +99,7 @@ app.get('/api/tasks', requireAuth, async (req, res) => {
     // admin 跨用户查看时图片可能不属于当前 session，按图片自身 user_id 检索
     const imageMap = new Map();
     if (allImageIds.size > 0) {
-      const imageWhere = ['id IN (?)', 'deleted_at IS NULL'];
+      const imageWhere = ['id IN (?)'];
       const imageParams = [Array.from(allImageIds)];
       if (req.user.role !== 'admin') {
         imageWhere.push('user_id = ?');
@@ -220,7 +223,7 @@ app.put('/api/tasks/:id/favorite', requireAuth, async (req, res) => {
     if (!access) return res.status(404).json({ error: 'Task not found' });
 
     await db.query(
-      'UPDATE tasks SET is_favorite = ? WHERE id = ? AND deleted_at IS NULL',
+      'UPDATE tasks SET is_favorite = ? WHERE id = ?',
       [next, id]
     );
 
@@ -256,8 +259,8 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
 
     // 普通用户只能删自己的；admin 可以删任意用户的（按 ids 命中）
     const taskWhereSql = isAdmin
-      ? 'id IN (?) AND deleted_at IS NULL'
-      : 'id IN (?) AND user_id = ? AND deleted_at IS NULL';
+      ? 'id IN (?)'
+      : 'id IN (?) AND user_id = ?';
     const taskWhereParams = isAdmin ? [ids] : [ids, req.session.userId];
     const [taskRows] = await db.query(
       `SELECT id, user_id, input_image_ids, output_image_ids FROM tasks WHERE ${taskWhereSql}`,
@@ -268,44 +271,8 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
       return res.json({ success: true, deletedCount: 0 });
     }
 
-    const targetIds = taskRows.map((t) => t.id);
     const ownerIds = new Set(taskRows.map((t) => Number(t.user_id)));
-    const targetImageIds = new Set();
-    for (const t of taskRows) {
-      const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
-      const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
-      for (const id of (ii || [])) targetImageIds.add(id);
-      for (const id of (oi || [])) targetImageIds.add(id);
-    }
-
-    await db.query(
-      `UPDATE tasks SET deleted_at = NOW() WHERE id IN (?)`,
-      [targetIds]
-    );
-
-    if (targetImageIds.size > 0) {
-      // 各 owner 各自检查孤立图片
-      for (const ownerId of ownerIds) {
-        const [otherTasks] = await db.query(
-          'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
-          [ownerId]
-        );
-        const stillReferenced = new Set();
-        for (const t of otherTasks) {
-          const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
-          const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
-          for (const imgId of (ii || [])) stillReferenced.add(imgId);
-          for (const imgId of (oi || [])) stillReferenced.add(imgId);
-        }
-        const orphans = Array.from(targetImageIds).filter((imgId) => !stillReferenced.has(imgId));
-        if (orphans.length > 0) {
-          await db.query(
-            'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-            [orphans, ownerId]
-          );
-        }
-      }
-    }
+    const { deletedTaskCount } = await deleteTasksAndUnreferencedImages(taskRows);
 
     // M8: admin 跨用户批量删除审计
     const adminActorId = req.user.role === 'admin' ? req.user.id : null;
@@ -330,7 +297,7 @@ app.post('/api/tasks/batch-delete', requireAuth, async (req, res) => {
       }
     }
 
-    res.json({ success: true, deletedCount: targetIds.length });
+    res.json({ success: true, deletedCount: deletedTaskCount });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Batch delete error:`, error.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -346,44 +313,10 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
     const { ownerId, isAdminAccess } = access;
 
     const [taskRows] = await db.query(
-      'SELECT input_image_ids, output_image_ids FROM tasks WHERE id = ? AND deleted_at IS NULL',
+      'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE id = ?',
       [id]
     );
-
-    await db.query(
-      'UPDATE tasks SET deleted_at = NOW() WHERE id = ?',
-      [id]
-    );
-
-    if (taskRows.length > 0) {
-      const task = taskRows[0];
-      const inputIds = typeof task.input_image_ids === 'string' ? JSON.parse(task.input_image_ids) : (task.input_image_ids || []);
-      const outputIds = typeof task.output_image_ids === 'string' ? JSON.parse(task.output_image_ids) : (task.output_image_ids || []);
-      const allImageIds = [...new Set([...(inputIds || []), ...(outputIds || [])])];
-
-      if (allImageIds.length > 0) {
-        const [otherTasks] = await db.query(
-          'SELECT input_image_ids, output_image_ids FROM tasks WHERE user_id = ? AND deleted_at IS NULL',
-          [ownerId]
-        );
-
-        const stillReferenced = new Set();
-        for (const t of otherTasks) {
-          const ii = typeof t.input_image_ids === 'string' ? JSON.parse(t.input_image_ids) : (t.input_image_ids || []);
-          const oi = typeof t.output_image_ids === 'string' ? JSON.parse(t.output_image_ids) : (t.output_image_ids || []);
-          for (const imgId of (ii || [])) stillReferenced.add(imgId);
-          for (const imgId of (oi || [])) stillReferenced.add(imgId);
-        }
-
-        const orphanIds = allImageIds.filter(imgId => !stillReferenced.has(imgId));
-        if (orphanIds.length > 0) {
-          await db.query(
-            'UPDATE images SET deleted_at = NOW() WHERE id IN (?) AND user_id = ? AND deleted_at IS NULL',
-            [orphanIds, ownerId]
-          );
-        }
-      }
-    }
+    await deleteTasksAndUnreferencedImages(taskRows);
 
     // M8: 跨用户任务删除审计
     if (isAdminAccess) {
@@ -408,13 +341,12 @@ app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
 app.delete('/api/tasks', requireAuth, async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] 🗑️  Clear all tasks - User ID: ${req.session.userId}`);
-    const [result] = await db.query('UPDATE tasks SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL', [req.session.userId]);
-    // 同步软删除该用户的所有图片
-    const [imgResult] = await db.query(
-      'UPDATE images SET deleted_at = NOW() WHERE user_id = ? AND deleted_at IS NULL',
+    const [taskRows] = await db.query(
+      'SELECT id, input_image_ids, output_image_ids FROM tasks WHERE user_id = ?',
       [req.session.userId]
     );
-    console.log(`[${new Date().toISOString()}] ✅ Cleared ${result.affectedRows} tasks, ${imgResult.affectedRows} images`);
+    const { deletedTaskCount, images } = await deleteTasksAndUnreferencedImages(taskRows);
+    console.log(`[${new Date().toISOString()}] ✅ Cleared ${deletedTaskCount} tasks, ${images.deleted} images`);
     res.json({ success: true });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Clear tasks error:`, error.message);

@@ -22,14 +22,14 @@ export default function createAdminStatsRouter(db) {
            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_tasks,
            SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS tasks_7d,
            SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND status = 'error' THEN 1 ELSE 0 END) AS error_tasks_7d
-         FROM tasks WHERE deleted_at IS NULL`
+         FROM tasks`
       );
 
       const [[images]] = await db.query(
         `SELECT
            COUNT(*) AS total_images,
            COALESCE(SUM(file_size), 0) AS total_bytes
-         FROM images WHERE deleted_at IS NULL`
+         FROM images`
       );
 
       res.json({
@@ -67,8 +67,7 @@ export default function createAdminStatsRouter(db) {
                 SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
                 SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error
          FROM tasks
-         WHERE deleted_at IS NULL
-           AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+         WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
          GROUP BY DATE(created_at)
          ORDER BY day ASC`,
         [days]
@@ -106,7 +105,7 @@ export default function createAdminStatsRouter(db) {
                 COUNT(i.id) AS image_count,
                 COALESCE(SUM(i.file_size), 0) AS storage_bytes
          FROM users u
-         LEFT JOIN images i ON i.user_id = u.id AND i.deleted_at IS NULL
+         LEFT JOIN images i ON i.user_id = u.id
          WHERE u.deleted_at IS NULL
          GROUP BY u.id, u.username, u.avatar_url
          ORDER BY storage_bytes DESC
@@ -136,7 +135,7 @@ export default function createAdminStatsRouter(db) {
                 u.username, u.avatar_url
          FROM tasks t
          LEFT JOIN users u ON u.id = t.user_id
-         WHERE t.status = 'error' AND t.deleted_at IS NULL
+         WHERE t.status = 'error'
          ORDER BY t.created_at DESC
          LIMIT ?`,
         [limit]
