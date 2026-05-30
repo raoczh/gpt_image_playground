@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { getSiteConfig, type SiteConfig } from '../lib/adminApi'
 
 const levelStyles: Record<string, string> = {
-  info: 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/30',
-  warning: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30',
-  error: 'bg-red-50 text-red-800 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30',
+  info: 'bg-primary/10 text-primary border-primary/20',
+  warning: 'bg-warning/10 text-warning border-warning/20',
+  error: 'bg-danger/10 text-danger border-danger/20',
 }
 
 export default function AnnouncementBanner() {
@@ -52,9 +53,7 @@ export default function AnnouncementBanner() {
         className="ml-3 shrink-0 opacity-60 hover:opacity-100 transition-opacity"
         aria-label="关闭公告"
       >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path d="M6 6l12 12M6 18L18 6" />
-        </svg>
+        <X className="w-4 h-4" />
       </button>
     </div>
   )

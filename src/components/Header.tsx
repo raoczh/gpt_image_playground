@@ -2,7 +2,10 @@ import { useStore } from '../store'
 import { redirectToGitHubLogin, logout } from '../lib/backendApi'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Download, HelpCircle, Settings } from 'lucide-react'
 import HelpModal from './HelpModal'
+import IconButton from './ui/IconButton'
+import { GithubIcon } from './icons'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -69,7 +72,6 @@ export default function Header() {
       }
       return
     }
-    // iOS / 微信内置浏览器没有 beforeinstallprompt，给出文字提示
     const { isIOS, isWeChat } = detectIosOrWeChat()
     if (isWeChat) {
       showToast('请点击右上角菜单 → 在浏览器中打开后再安装', 'info')
@@ -83,75 +85,48 @@ export default function Header() {
   const showInstallButton = !isStandalone
 
   return (
-    <header className="safe-area-top sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
-      <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
-        <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 tracking-tight">
+    <header className="safe-area-top sticky top-0 z-40 border-b border-border bg-surface">
+      <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between">
+        <h1 className="text-lg font-bold tracking-tight text-foreground">
           GPT Image Playground
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {showInstallButton && (
-            <button
-              onClick={handleInstall}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-gray-600 dark:text-gray-400"
-              title="安装应用"
-              aria-label="安装应用"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-            </button>
+            <IconButton onClick={handleInstall} title="安装应用" aria-label="安装应用">
+              <Download className="h-5 w-5" />
+            </IconButton>
           )}
 
-          <button
-            onClick={() => setShowHelp(true)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-gray-600 dark:text-gray-400"
-            title="操作指南"
-            aria-label="操作指南"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <path d="M12 17h.01" />
-            </svg>
-          </button>
+          <IconButton onClick={() => setShowHelp(true)} title="操作指南" aria-label="操作指南">
+            <HelpCircle className="h-5 w-5" />
+          </IconButton>
 
           {/* 用户信息或登录按钮 */}
           {user ? (
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-surface-2"
                 title={user.username}
               >
-                <img
-                  src={user.avatar_url}
-                  alt={user.username}
-                  className="w-7 h-7 rounded-full"
-                />
+                <img src={user.avatar_url} alt={user.username} className="h-7 w-7 rounded-full" />
               </button>
 
               {showUserMenu && (
                 <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowUserMenu(false)}
-                  />
-                  <div className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-white/[0.08] dark:bg-gray-900 z-50">
-                    <div className="p-3 border-b border-gray-200 dark:border-white/[0.08]">
-                      <div className="text-sm font-medium text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
+                  <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                  <div className="absolute right-0 z-50 mt-2 w-48 rounded-xl border border-border bg-elevated shadow-lg">
+                    <div className="border-b border-border p-3">
+                      <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                         {user.username}
                         {user.role === 'admin' && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300">
+                          <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning">
                             admin
                           </span>
                         )}
                       </div>
                       {user.email && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {user.email}
-                        </div>
+                        <div className="truncate text-xs text-muted">{user.email}</div>
                       )}
                     </div>
                     {user.role === 'admin' && (
@@ -160,14 +135,14 @@ export default function Header() {
                           setShowUserMenu(false)
                           navigate('/admin')
                         }}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors border-b border-gray-200 dark:border-white/[0.08]"
+                        className="w-full border-b border-border px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-surface-2"
                       >
                         管理后台
                       </button>
                     )}
                     <button
                       onClick={handleLogout}
-                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 transition-colors rounded-b-xl"
+                      className="w-full rounded-b-xl px-3 py-2 text-left text-sm text-danger transition-colors hover:bg-danger/10"
                     >
                       退出登录
                     </button>
@@ -178,40 +153,16 @@ export default function Header() {
           ) : (
             <button
               onClick={redirectToGitHubLogin}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 transition-colors flex items-center gap-1.5"
+              className="ml-1 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-surface transition-colors hover:bg-foreground/90"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
+              <GithubIcon className="h-4 w-4" />
               登录
             </button>
           )}
 
-          <button
-            onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-            title="设置"
-          >
-            <svg
-              className="w-5 h-5 text-gray-600 dark:text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-            </svg>
-          </button>
+          <IconButton onClick={() => setShowSettings(true)} title="设置" aria-label="设置">
+            <Settings className="h-5 w-5" />
+          </IconButton>
         </div>
       </div>
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}

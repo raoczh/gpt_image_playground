@@ -379,24 +379,24 @@ export default function SettingsModal() {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
+        className="absolute inset-0 bg-black/50 animate-overlay-in"
         onClick={handleRequestClose}
       />
-      <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 flex flex-col max-h-[85vh] overflow-hidden">
+      <div className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-elevated shadow-2xl animate-modal-in flex flex-col max-h-[85vh] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 px-5 pt-5 pb-4 border-b border-gray-100 dark:border-white/[0.06]">
-          <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex items-center justify-between gap-4 px-5 pt-5 pb-4 border-b border-border">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             设置
           </h3>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400 dark:text-gray-500 font-mono select-none">v{__APP_VERSION__}</span>
+            <span className="text-xs text-subtle font-mono select-none">v{__APP_VERSION__}</span>
             <button
               onClick={handleRequestClose}
-              className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+              className="rounded-full p-1 text-subtle transition hover:bg-surface-2 hover:text-foreground"
               aria-label="关闭"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,15 +409,15 @@ export default function SettingsModal() {
         {/* Body：左侧菜单 + 右侧内容 */}
         <div className="flex flex-1 min-h-0 flex-col md:flex-row">
           {/* 顶部 chips（移动端） */}
-          <nav className="md:hidden flex gap-1.5 overflow-x-auto px-4 py-2 border-b border-gray-100 dark:border-white/[0.06] hide-scrollbar">
+          <nav className="md:hidden flex gap-1.5 overflow-x-auto px-4 py-2 border-b border-border hide-scrollbar">
             {visibleNav.map((item) => (
               <button
                 key={item.key}
                 onClick={() => handleRequestSwitchTab(item.key)}
                 className={`shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs whitespace-nowrap transition ${
                   activeTab === item.key
-                    ? 'bg-blue-500 text-white shadow-sm'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-surface-2 text-muted hover:bg-surface-2'
                 }`}
               >
                 {item.icon}
@@ -427,18 +427,18 @@ export default function SettingsModal() {
           </nav>
 
           {/* 左侧菜单（桌面端） */}
-          <nav className="hidden md:flex md:w-44 shrink-0 flex-col gap-1 border-r border-gray-100 dark:border-white/[0.06] p-3">
+          <nav className="hidden md:flex md:w-44 shrink-0 flex-col gap-1 border-r border-border p-3">
             {visibleNav.map((item) => (
               <button
                 key={item.key}
                 onClick={() => handleRequestSwitchTab(item.key)}
                 className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition text-left ${
                   activeTab === item.key
-                    ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted hover:bg-surface-2'
                 }`}
               >
-                <span className={activeTab === item.key ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}>
+                <span className={activeTab === item.key ? 'text-primary' : 'text-subtle'}>
                   {item.icon}
                 </span>
                 {item.label}
@@ -481,7 +481,7 @@ export default function SettingsModal() {
 
               {activeTab === 'quota' && user && (
                 <div className="space-y-4">
-                  <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">我的额度</h4>
+                  <h4 className="text-sm font-medium text-foreground">我的额度</h4>
                   <MyQuotaCard />
                 </div>
               )}
@@ -503,16 +503,16 @@ export default function SettingsModal() {
 
             {/* 底部保存栏：仅 API tab 显示 */}
             {activeTab === 'api' && user && currentProfile && (
-              <div className="border-t border-gray-100 dark:border-white/[0.06] px-5 py-3 flex items-center justify-between gap-3 bg-gray-50/40 dark:bg-white/[0.02]">
-                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 min-w-0">
+              <div className="border-t border-border px-5 py-3 flex items-center justify-between gap-3 bg-surface-2">
+                <div className="text-xs text-muted flex items-center gap-2 min-w-0">
                   {isApiDirty ? (
                     <>
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-warning shrink-0" />
                       <span className="truncate">有未保存的修改</span>
                     </>
                   ) : (
                     <>
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-success shrink-0" />
                       <span className="truncate">已与服务器同步</span>
                     </>
                   )}
@@ -522,7 +522,7 @@ export default function SettingsModal() {
                     type="button"
                     onClick={discardDraft}
                     disabled={!isApiDirty || saving}
-                    className="px-3 py-1.5 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 rounded-lg text-xs text-muted hover:bg-surface-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     放弃修改
                   </button>
@@ -530,7 +530,7 @@ export default function SettingsModal() {
                     type="button"
                     onClick={saveCurrentProfile}
                     disabled={!isApiDirty || saving}
-                    className="px-4 py-1.5 rounded-lg text-xs font-medium bg-blue-500 text-white hover:bg-blue-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    className="px-4 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                   >
                     {saving && (
                       <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
@@ -549,33 +549,33 @@ export default function SettingsModal() {
         {/* dirty 拦截条 */}
         {pendingNav && (
           <div className="absolute left-0 right-0 bottom-0 mx-auto p-3 z-20">
-            <div className="mx-auto max-w-md rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-amber-50/95 dark:bg-amber-500/10 backdrop-blur p-3 shadow-lg ring-1 ring-amber-200/50 flex items-start gap-3">
-              <svg className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="mx-auto max-w-md rounded-2xl border border-warning/30 bg-warning/15 p-3 shadow-lg flex items-start gap-3">
+              <svg className="w-5 h-5 text-warning mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z" />
               </svg>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-amber-800 dark:text-amber-200">有未保存的修改</div>
-                <div className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-0.5">是否保存当前 Profile 的修改？</div>
+                <div className="text-sm font-medium text-warning">有未保存的修改</div>
+                <div className="text-xs text-warning/80 mt-0.5">是否保存当前 Profile 的修改？</div>
                 <div className="flex items-center gap-2 mt-2.5">
                   <button
                     type="button"
                     onClick={resumePendingAfterSave}
                     disabled={saving}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition disabled:opacity-50"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-warning text-primary-foreground hover:bg-warning/90 transition disabled:opacity-50"
                   >
                     保存并继续
                   </button>
                   <button
                     type="button"
                     onClick={resumePendingAfterDiscard}
-                    className="px-3 py-1.5 rounded-lg text-xs text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/10 transition"
+                    className="px-3 py-1.5 rounded-lg text-xs text-warning hover:bg-warning/15 transition"
                   >
                     放弃修改
                   </button>
                   <button
                     type="button"
                     onClick={() => setPendingNav(null)}
-                    className="px-3 py-1.5 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition ml-auto"
+                    className="px-3 py-1.5 rounded-lg text-xs text-muted hover:bg-surface-2 transition ml-auto"
                   >
                     继续编辑
                   </button>
@@ -644,21 +644,21 @@ function ApiTab({
   onShareProfile,
   onImportProfile,
 }: ApiTabProps) {
-  const fieldLabel = 'block text-xs text-gray-500 dark:text-gray-400 mb-1.5'
+  const fieldLabel = 'block text-xs text-muted mb-1.5'
   const fieldInput =
-    'w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50'
+    'w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary'
 
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">API 配置</h4>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <h4 className="text-sm font-medium text-foreground">API 配置</h4>
+        <p className="text-xs text-muted mt-1">
           管理调用图片生成接口所用的服务地址、密钥与模型。修改后点击右下角「保存」生效。
         </p>
       </div>
 
       {!user && (
-        <div className="rounded-xl border border-blue-200/70 dark:border-blue-500/20 bg-blue-50/60 dark:bg-blue-500/[0.08] px-3 py-2.5 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+        <div className="rounded-xl border border-primary/20 bg-primary/10 px-3 py-2.5 text-xs text-primary flex items-start gap-2">
           <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -668,13 +668,13 @@ function ApiTab({
 
       {/* Profile 选择 + 操作 */}
       {user && (
-        <section className="rounded-2xl border border-gray-200/70 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] p-4 space-y-3">
+        <section className="rounded-2xl border border-border bg-surface-2 p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 w-16">Profile</span>
+            <span className="text-xs text-muted shrink-0 w-16">Profile</span>
             <select
               value={activeProfileId || ''}
               onChange={(e) => onSwitchProfile(e.target.value)}
-              className="flex-1 rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-1.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+              className="flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary"
             >
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -684,7 +684,7 @@ function ApiTab({
               ))}
             </select>
             {loading && (
-              <svg className="animate-spin h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <svg className="animate-spin h-4 w-4 text-subtle flex-shrink-0" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
               </svg>
@@ -692,34 +692,34 @@ function ApiTab({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 w-16">名称</span>
+            <span className="text-xs text-muted shrink-0 w-16">名称</span>
             <input
               type="text"
               value={draftProfileName}
               onChange={(e) => setDraftProfileName(e.target.value)}
               placeholder="Profile 名称"
-              className="flex-1 rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+              className="flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary"
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
-            <button type="button" onClick={onCreateNewProfile} className="px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition flex items-center gap-1">
+            <button type="button" onClick={onCreateNewProfile} className="px-2.5 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-2 text-muted transition flex items-center gap-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
               新建
             </button>
-            <button type="button" onClick={onSetAsDefault} className="px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.1] text-gray-600 dark:text-gray-300 transition flex items-center gap-1">
+            <button type="button" onClick={onSetAsDefault} className="px-2.5 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-2 text-muted transition flex items-center gap-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
               设默认
             </button>
-            <button type="button" onClick={onShareProfile} className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-300 transition flex items-center gap-1" title="复制分享链接（不含 API Key）">
+            <button type="button" onClick={onShareProfile} className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 text-primary transition flex items-center gap-1" title="复制分享链接（不含 API Key）">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m9.032 4.026a3 3 0 10-2.684-4.684M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               分享链接
             </button>
-            <button type="button" onClick={onImportProfile} className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:text-blue-300 transition flex items-center gap-1" title="粘贴分享链接 / JSON 导入 Profile">
+            <button type="button" onClick={onImportProfile} className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 text-primary transition flex items-center gap-1" title="粘贴分享链接 / JSON 导入 Profile">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
               导入
             </button>
-            <button type="button" onClick={onDeleteCurrentProfile} className="ml-auto px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:text-red-400 transition flex items-center gap-1">
+            <button type="button" onClick={onDeleteCurrentProfile} className="ml-auto px-2.5 py-1.5 rounded-lg bg-danger/15 hover:bg-danger/20 text-danger transition flex items-center gap-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
               删除
             </button>
@@ -745,7 +745,7 @@ function ApiTab({
                 ))}
               </select>
               {draftProvider !== 'openai' && (
-                <div className="mt-1 text-[10px] text-red-500 dark:text-red-400">
+                <div className="mt-1 text-[10px] text-danger">
                   当前部署仅启用 OpenAI 兼容，选其他 provider 提交任务会失败
                 </div>
               )}
@@ -767,7 +767,7 @@ function ApiTab({
               <option value="responses">Responses API</option>
             </select>
             {(draft.apiFormat ?? 'imagen') === 'responses' && (
-              <div className="mt-1 text-[10px] text-amber-500 dark:text-amber-400">
+              <div className="mt-1 text-[10px] text-warning">
                 将使用 /v1/responses 端点，模型需填写支持图片生成工具的模型（如 gpt-4.1-mini）
               </div>
             )}
@@ -783,9 +783,9 @@ function ApiTab({
             placeholder={DEFAULT_SETTINGS.baseUrl || 'https://api.openai.com'}
             className={fieldInput}
           />
-          <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+          <div className="mt-1 text-[10px] text-subtle">
             留空时使用服务器配置的默认 API URL；也可通过查询参数覆盖：
-            <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>
+            <code className="bg-surface-2 px-1 py-0.5 rounded">?apiUrl=</code>
           </div>
         </label>
 
@@ -810,7 +810,7 @@ function ApiTab({
             <button
               type="button"
               onClick={() => setShowApiKey((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-subtle hover:text-foreground transition-colors"
               tabIndex={-1}
               aria-label={showApiKey ? '隐藏 API Key' : '显示 API Key'}
             >
@@ -829,7 +829,7 @@ function ApiTab({
               )}
             </button>
           </div>
-          <div className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+          <div className="mt-1 text-[10px] text-subtle">
             留空时使用服务器配置的默认 API Key；保留掩码不会修改原 Key
           </div>
         </div>
@@ -871,8 +871,8 @@ function PreferencesTab({ settings }: { settings: AppSettings }) {
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">习惯偏好</h4>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <h4 className="text-sm font-medium text-foreground">习惯偏好</h4>
+        <p className="text-xs text-muted mt-1">
           这些开关会即时生效并同步到云端，无需手动保存。
         </p>
       </div>
@@ -916,8 +916,8 @@ function DataTab({
   return (
     <div className="space-y-5">
       <div>
-        <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">数据管理</h4>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <h4 className="text-sm font-medium text-foreground">数据管理</h4>
+        <p className="text-xs text-muted mt-1">
           导出本地任务为 ZIP，或从备份恢复。清空操作不可恢复，请谨慎操作。
         </p>
       </div>
@@ -925,7 +925,7 @@ function DataTab({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <button
           onClick={() => exportData()}
-          className="rounded-xl bg-gray-100/80 px-4 py-3 text-sm text-gray-700 dark:text-gray-200 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] flex items-center justify-center gap-2"
+          className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-foreground transition hover:bg-surface-2 flex items-center justify-center gap-2"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -934,7 +934,7 @@ function DataTab({
         </button>
         <button
           onClick={() => importInputRef.current?.click()}
-          className="rounded-xl bg-gray-100/80 px-4 py-3 text-sm text-gray-700 dark:text-gray-200 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] flex items-center justify-center gap-2"
+          className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-foreground transition hover:bg-surface-2 flex items-center justify-center gap-2"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -944,14 +944,14 @@ function DataTab({
         <input ref={importInputRef} type="file" accept=".zip" className="hidden" onChange={onImport} />
       </div>
 
-      <div className="rounded-xl border border-red-200/80 dark:border-red-500/20 bg-red-50/40 dark:bg-red-500/[0.06] p-4">
-        <div className="text-sm font-medium text-red-600 dark:text-red-400">危险区</div>
-        <p className="text-xs text-red-500/80 dark:text-red-300/70 mt-1">
+      <div className="rounded-xl border border-danger/20 bg-danger/15 p-4">
+        <div className="text-sm font-medium text-danger">危险区</div>
+        <p className="text-xs text-danger/80 mt-1">
           清空所有任务记录和图片数据。该操作不可恢复，请先导出备份。
         </p>
         <button
           onClick={onConfirmClear}
-          className="mt-3 px-4 py-2 rounded-lg bg-red-500 text-white text-xs font-medium hover:bg-red-600 transition"
+          className="mt-3 px-4 py-2 rounded-lg bg-danger text-primary-foreground text-xs font-medium hover:bg-danger/90 transition"
         >
           清空所有数据
         </button>
@@ -972,14 +972,14 @@ function ToggleRow({
   onChange: (v: boolean) => void
 }) {
   return (
-    <label className="flex items-start gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-white/[0.03] transition cursor-pointer">
+    <label className="flex items-start gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-2 transition cursor-pointer">
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`mt-0.5 relative shrink-0 w-9 h-5 rounded-full transition-colors ${
-          checked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-white/[0.1]'
+          checked ? 'bg-primary' : 'bg-border-strong'
         }`}
       >
         <span
@@ -989,8 +989,8 @@ function ToggleRow({
         />
       </button>
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-gray-700 dark:text-gray-200">{label}</div>
-        <div className="text-[11px] text-gray-400 dark:text-gray-500 leading-snug mt-0.5">{desc}</div>
+        <div className="text-sm text-foreground">{label}</div>
+        <div className="text-[11px] text-subtle leading-snug mt-0.5">{desc}</div>
       </div>
     </label>
   )

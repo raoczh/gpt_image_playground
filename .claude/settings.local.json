@@ -24,7 +24,12 @@
       "Bash(git checkout *)",
       "Bash(node -c *)",
       "Bash(node --check *)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "WebFetch(domain:github.com)",
+      "Bash(git ls-remote *)",
+      "Bash(sort -t. -k2,2n -k3,3n)",
+      "Bash(git fetch *)",
+      "Bash(echo \"=== tsc exit: $? ===\")"
     ]
   }
 }

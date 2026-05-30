@@ -1,7 +1,9 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
+import { Paperclip, ArrowRight, X, Pencil, Trash2, Image as ImageIcon } from 'lucide-react'
 import { useStore, submitTask, addImageFromFile } from '../store'
 import { DEFAULT_PARAMS } from '../types'
 import { normalizeImageSize } from '../lib/size'
+import { cn } from '../lib/cn'
 import Select from './Select'
 import SizePickerModal from './SizePickerModal'
 
@@ -10,9 +12,9 @@ function ButtonTooltip({ visible, text }: { visible: boolean; text: string }) {
   if (!visible) return null
   return (
     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none z-10 whitespace-nowrap">
-      <div className="relative bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg">
+      <div className="relative bg-foreground text-canvas text-xs rounded-lg px-3 py-2 shadow-lg">
         {text}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
+        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground" />
       </div>
     </div>
   )
@@ -330,7 +332,7 @@ export default function InputBar() {
     }
   }, [])
 
-  const selectClass = 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
+  const selectClass = 'px-3 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface-2 text-xs text-foreground transition-colors shadow-sm'
 
   const renderImageThumbs = () => (
     <div ref={imagesRef}>
@@ -430,12 +432,12 @@ export default function InputBar() {
               <div
                 className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing ${
                   showDropBefore
-                    ? 'border-l-2 border-blue-500'
+                    ? 'border-l-2 border-primary'
                     : showDropAfter
-                      ? 'border-r-2 border-blue-500'
+                      ? 'border-r-2 border-primary'
                       : maskDraft?.targetImageId === img.id
-                        ? 'border-2 border-blue-500'
-                        : 'border border-gray-200 dark:border-white/[0.08]'
+                        ? 'border-2 border-primary'
+                        : 'border border-border'
                 }`}
                 onClick={() => {
                   if (thumbJustDraggedRef.current) return
@@ -449,7 +451,7 @@ export default function InputBar() {
                 />
               </div>
               <span
-                className="absolute -bottom-1 -right-1 w-[22px] h-[22px] rounded-full bg-blue-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-blue-600 z-30"
+                className="absolute -bottom-1 -right-1 w-[22px] h-[22px] rounded-full bg-primary text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-primary/90 z-30"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -457,21 +459,17 @@ export default function InputBar() {
                 }}
                 title={maskDraft?.targetImageId === img.id ? '编辑遮罩' : '添加遮罩'}
               >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
+                <Pencil className="w-3 h-3" />
               </span>
               <span
-                className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 z-30"
+                className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-danger text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-danger/90 z-30"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
                   removeInputImage(idx)
                 }}
               >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="w-3 h-3" strokeWidth={2.5} />
               </span>
             </div>
           )
@@ -486,12 +484,10 @@ export default function InputBar() {
               action: () => clearInputImages(),
             })
           }
-          className="w-[52px] h-[52px] rounded-xl border border-dashed border-gray-300 dark:border-white/[0.08] flex flex-col items-center justify-center gap-0.5 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-all cursor-pointer flex-shrink-0"
+          className="w-[52px] h-[52px] rounded-xl border border-dashed border-border flex flex-col items-center justify-center gap-0.5 text-subtle hover:text-danger hover:border-danger/40 hover:bg-danger/5 transition-colors cursor-pointer flex-shrink-0"
           title="清空全部参考图"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
+          <Trash2 className="w-4 h-4" />
           <span className="text-[9px] leading-none">清空</span>
         </button>
       </div>
@@ -501,18 +497,18 @@ export default function InputBar() {
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
+        <span className="text-subtle ml-1">尺寸</span>
         <button
           type="button"
           onClick={() => setShowSizePicker(true)}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
+          className="px-3 py-1.5 rounded-xl border border-border bg-surface hover:bg-surface-2 focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
           title="选择尺寸"
         >
           {normalizeImageSize(params.size) || DEFAULT_PARAMS.size}
         </button>
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
+        <span className="text-subtle ml-1">质量</span>
         <Select
           value={params.quality}
           onChange={(val) => setParams({ quality: val as any })}
@@ -526,7 +522,7 @@ export default function InputBar() {
         />
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">格式</span>
+        <span className="text-subtle ml-1">格式</span>
         <Select
           value={params.output_format}
           onChange={(val) => setParams({ output_format: val as any })}
@@ -539,7 +535,7 @@ export default function InputBar() {
         />
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">压缩率</span>
+        <span className="text-subtle ml-1">压缩率</span>
         <input
           value={outputCompressionInput}
           onChange={(e) => setOutputCompressionInput(e.target.value)}
@@ -549,15 +545,15 @@ export default function InputBar() {
           min={0}
           max={100}
           placeholder="0-100"
-          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+          className={`px-3 py-1.5 rounded-xl border border-border focus:outline-none text-xs transition-all duration-200 shadow-sm ${
             params.output_format === 'png'
-              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-              : 'bg-white/50 dark:bg-white/[0.03]'
+              ? 'bg-surface-2 opacity-50 cursor-not-allowed'
+              : 'bg-surface'
           }`}
         />
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">审核</span>
+        <span className="text-subtle ml-1">审核</span>
         <Select
           value={params.moderation}
           onChange={(val) => setParams({ moderation: val as any })}
@@ -569,7 +565,7 @@ export default function InputBar() {
         />
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
+        <span className="text-subtle ml-1">数量</span>
         <input
           value={nInput}
           onChange={(e) => setNInput(e.target.value)}
@@ -577,7 +573,7 @@ export default function InputBar() {
           type="number"
           min={1}
           max={4}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none text-xs transition-all duration-200 shadow-sm"
+          className="px-3 py-1.5 rounded-xl border border-border bg-surface focus:outline-none text-xs transition-all duration-200 shadow-sm"
         />
       </label>
     </div>
@@ -587,31 +583,24 @@ export default function InputBar() {
     <>
       {/* 全屏拖拽遮罩 */}
       {isDragging && (
-        <div className="fixed inset-0 z-[100] bg-white/60 dark:bg-gray-900/60 backdrop-blur-md flex flex-col items-center justify-center pointer-events-none">
+        <div className="fixed inset-0 z-[100] bg-canvas/90 flex flex-col items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-4 p-8 rounded-3xl">
-            <div className={`w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center ${
-              atImageLimit ? 'bg-red-50 dark:bg-red-500/10 border-red-300' : 'bg-blue-50 dark:bg-blue-500/10 border-blue-400'
-            }`}>
-              {atImageLimit ? (
-                <svg className="w-10 h-10 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-              ) : (
-                <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              )}
+            <div className={cn(
+              'w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center',
+              atImageLimit ? 'bg-danger/10 border-danger/40 text-danger' : 'bg-primary/10 border-primary/50 text-primary',
+            )}>
+              <ImageIcon className="w-10 h-10" strokeWidth={1.5} />
             </div>
             <div className="text-center">
               {atImageLimit ? (
                 <>
-                  <p className="text-lg font-semibold text-red-500">已达上限 {API_MAX_IMAGES} 张</p>
-                  <p className="text-sm text-gray-400 mt-1">请先移除部分参考图后再添加</p>
+                  <p className="text-lg font-semibold text-danger">已达上限 {API_MAX_IMAGES} 张</p>
+                  <p className="text-sm text-subtle mt-1">请先移除部分参考图后再添加</p>
                 </>
               ) : (
                 <>
-                  <p className="text-lg font-semibold text-gray-700 dark:text-gray-200">释放以添加参考图</p>
-                  <p className="text-sm text-gray-400 mt-1">支持 JPG、PNG、WebP 等格式</p>
+                  <p className="text-lg font-semibold text-foreground">释放以添加参考图</p>
+                  <p className="text-sm text-subtle mt-1">支持 JPG、PNG、WebP 等格式</p>
                 </>
               )}
             </div>
@@ -628,14 +617,14 @@ export default function InputBar() {
       )}
 
       <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
-        <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
+        <div ref={cardRef} className="bg-elevated border border-border shadow-xl rounded-2xl sm:rounded-3xl p-3 sm:p-4">
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
             className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
             onClick={() => setMobileCollapsed((v) => !v)}
           >
-            <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
+            <div className={`w-10 h-1 rounded-full bg-border transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
           </div>
 
           {/* 输入图片行（移动端可折叠） */}
@@ -648,7 +637,7 @@ export default function InputBar() {
                   </div>
                 </div>
                 {mobileCollapsed && (
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 ml-1">{inputImages.length} 张参考图</div>
+                  <div className="text-xs text-subtle mb-2 ml-1">{inputImages.length} 张参考图</div>
                 )}
               </>
             ) : (
@@ -664,7 +653,7 @@ export default function InputBar() {
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder="描述你想生成的图片..."
-            className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
+            className="w-full px-4 py-3 rounded-2xl border border-border bg-surface text-sm text-foreground placeholder:text-subtle focus:outline-none focus:border-primary leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
           />
 
           {/* 参数 + 按钮 */}
@@ -682,16 +671,15 @@ export default function InputBar() {
                   <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
                   <button
                     onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                    className={cn(
+                      'p-2.5 rounded-xl transition-colors shadow-sm',
                       atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
-                    }`}
+                        ? 'bg-surface-2 text-subtle cursor-not-allowed'
+                        : 'bg-surface-2 hover:bg-border text-muted hover:text-foreground',
+                    )}
                     title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加参考图'}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
+                    <Paperclip className="w-5 h-5" />
                   </button>
                 </div>
                 <div
@@ -703,14 +691,10 @@ export default function InputBar() {
                   <button
                     onClick={() => canSubmit && submitTask()}
                     disabled={!canSubmit}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
-                      'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
+                    className="p-2.5 rounded-xl bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:bg-surface-2 disabled:text-subtle disabled:opacity-60 disabled:cursor-not-allowed"
                     title={isUploading ? '图片处理中…' : '生成 (Ctrl+Enter)'}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
+                    <ArrowRight className="w-5 h-5" />
                   </button>
                 </div>
               </div>
@@ -734,16 +718,15 @@ export default function InputBar() {
                   <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
                   <button
                     onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
+                    className={cn(
+                      'p-2.5 rounded-xl transition-colors shadow-sm flex-shrink-0',
                       atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
-                    }`}
+                        ? 'bg-surface-2 text-subtle cursor-not-allowed'
+                        : 'bg-surface-2 hover:bg-border text-muted hover:text-foreground',
+                    )}
                     title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加参考图'}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
+                    <Paperclip className="w-5 h-5" />
                   </button>
                 </div>
                 <div
@@ -755,13 +738,9 @@ export default function InputBar() {
                   <button
                     onClick={() => canSubmit && submitTask()}
                     disabled={!canSubmit}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
-                      'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:bg-surface-2 disabled:text-subtle disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
+                    <ArrowRight className="w-4 h-4" />
                     {isUploading ? '图片处理中…' : '生成图像'}
                   </button>
                 </div>

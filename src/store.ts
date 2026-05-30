@@ -1108,3 +1108,62 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file)
   })
 }
+
+// ===== running 任务轮询 =====
+// submitTask 触发的 executeTask 是一个挂起的 promise：页面刷新或换设备后它会丢失，
+// 导致从后端加载到的 running 任务永远停在“生成中”。这里在存在 running 任务时启动
+// 轻量轮询，从后端拉取最新状态，拿到终态即同步到本地 store 并自动停止。
+let runningPollTimer: ReturnType<typeof setInterval> | null = null
+let runningPollInFlight = false
+
+// 僵尸保护：后端异常未落终态的任务，超过此时长后不再跟踪，避免永久轮询
+const RUNNING_POLL_MAX_AGE_MS = 15 * 60 * 1000
+const RUNNING_POLL_INTERVAL_MS = 4000
+
+function trackedRunningTaskIds(): string[] {
+  const now = Date.now()
+  return useStore
+    .getState()
+    .tasks.filter((t) => t.status === 'running' && now - t.createdAt < RUNNING_POLL_MAX_AGE_MS)
+    .map((t) => t.id)
+}
+
+/** 拉取一次任务列表，把已出终态的 running 任务同步到本地 store */
+export async function refreshRunningTasks() {
+  if (runningPollInFlight) return
+  if (!useStore.getState().user) return
+  const trackedIds = new Set(trackedRunningTaskIds())
+  if (trackedIds.size === 0) return
+
+  runningPollInFlight = true
+  try {
+    // running 任务都是最近提交的，按 created_at DESC 一定落在第一页前部
+    const page = await backendApi.getTasks({ limit: 50 })
+    for (const item of page.items) {
+      if (!trackedIds.has(item.id) || item.status === 'running') continue
+      // 后端已出终态（done/error）；executeTask 若仍在跟踪，写入同样终态也是幂等的
+      updateTaskInStore(item.id, toTaskRecord(item))
+    }
+  } catch (err) {
+    console.error('Failed to poll running tasks:', err)
+  } finally {
+    runningPollInFlight = false
+  }
+}
+
+/** 根据是否存在 running 任务，启动 / 停止轮询定时器 */
+function ensureRunningPoll() {
+  const hasTracked = trackedRunningTaskIds().length > 0
+  if (hasTracked && runningPollTimer == null) {
+    runningPollTimer = setInterval(() => {
+      refreshRunningTasks().catch(console.error)
+    }, RUNNING_POLL_INTERVAL_MS)
+  } else if (!hasTracked && runningPollTimer != null) {
+    clearInterval(runningPollTimer)
+    runningPollTimer = null
+  }
+}
+
+// 任何 store 变化后检查一次（廉价：只做一次数组过滤）。覆盖所有产生 running 任务的路径：
+// initStore 刷新后加载、submitTask 乐观插入、executeTask 完成 / 轮询写回终态等。
+useStore.subscribe(ensureRunningPoll)

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
@@ -391,7 +392,7 @@ function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, to
   const zoomPercent = Math.round(s * 100)
 
   const navBtnClass =
-    'absolute top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white hover:bg-black/60 transition-all z-10 backdrop-blur-sm'
+    'absolute top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-all z-10'
 
   return (
     <div
@@ -402,7 +403,7 @@ function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, to
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-md animate-fade-in" />
+      <div className="absolute inset-0 bg-black/80 animate-fade-in" />
       <div className="relative animate-zoom-in">
         <img
           src={src}
@@ -429,7 +430,7 @@ function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, to
               onDragStart={(e) => e.preventDefault()}
               alt=""
             />
-            <span className="absolute top-3 left-3 px-2 py-1 rounded-full bg-red-500/80 text-white text-[10px] font-medium backdrop-blur-sm pointer-events-none">
+            <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-danger/80 px-2 py-1 text-[10px] font-medium text-white">
               蒙版预览
             </span>
           </>
@@ -443,17 +444,13 @@ function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, to
             className={`${navBtnClass} left-3 sm:left-5`}
             onClick={(e) => { e.stopPropagation(); goPrev() }}
           >
-            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            <ChevronLeft className="h-5 w-5 sm:h-6 sm:w-6" />
           </button>
           <button
             className={`${navBtnClass} right-3 sm:right-5`}
             onClick={(e) => { e.stopPropagation(); goNext() }}
           >
-            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+            <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6" />
           </button>
         </>
       )}
@@ -461,14 +458,14 @@ function LightboxInner({ src, maskOverlaySrc, onClose, showNav, currentIndex, to
       {/* 底部指示器 */}
       {showZoomBadge && isZoomed && zoomPercent !== 100 && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-          <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm transition-opacity duration-500">
+          <span className="rounded-full bg-black/60 px-3 py-1.5 text-xs text-white/80 transition-opacity duration-500">
             {zoomPercent}%
           </span>
         </div>
       )}
       {showNav && !isZoomed && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-          <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm">
+          <span className="rounded-full bg-black/60 px-3 py-1.5 text-xs text-white/80">
             {currentIndex + 1} / {total}
           </span>
         </div>

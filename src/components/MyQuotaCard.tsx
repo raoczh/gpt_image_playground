@@ -26,7 +26,7 @@ export default function MyQuotaCard() {
   if (error) return null
   if (!quota) {
     return (
-      <div className="rounded-lg bg-gray-50 dark:bg-gray-900/50 p-3 text-xs text-gray-500 dark:text-gray-400">
+      <div className="rounded-lg bg-surface-2 p-3 text-xs text-muted">
         加载额度中...
       </div>
     )
@@ -47,17 +47,17 @@ export default function MyQuotaCard() {
       : 0
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-white/[0.08] p-3 space-y-3">
-      <div className="text-xs font-medium text-gray-700 dark:text-gray-300">我的额度</div>
+    <div className="rounded-lg border border-border p-3 space-y-3">
+      <div className="text-xs font-medium text-foreground">我的额度</div>
       <div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-500 dark:text-gray-400">今日生成</span>
-          <span className="text-gray-700 dark:text-gray-200 tabular-nums">{dailyLimitText}</span>
+          <span className="text-muted">今日生成</span>
+          <span className="text-foreground tabular-nums">{dailyLimitText}</span>
         </div>
         {quota.daily.limit !== null && (
-          <div className="h-1.5 mt-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+          <div className="h-1.5 mt-1 bg-surface-2 rounded-full overflow-hidden">
             <div
-              className={`h-full ${dailyPct >= 90 ? 'bg-red-500' : dailyPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              className={`h-full ${dailyPct >= 90 ? 'bg-danger' : dailyPct >= 70 ? 'bg-warning' : 'bg-success'}`}
               style={{ width: `${dailyPct}%` }}
             />
           </div>
@@ -65,13 +65,13 @@ export default function MyQuotaCard() {
       </div>
       <div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-500 dark:text-gray-400">存储空间</span>
-          <span className="text-gray-700 dark:text-gray-200 tabular-nums">{storageLimitText}</span>
+          <span className="text-muted">存储空间</span>
+          <span className="text-foreground tabular-nums">{storageLimitText}</span>
         </div>
         {quota.storage.limit_bytes !== null && (
-          <div className="h-1.5 mt-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+          <div className="h-1.5 mt-1 bg-surface-2 rounded-full overflow-hidden">
             <div
-              className={`h-full ${storagePct >= 90 ? 'bg-red-500' : storagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              className={`h-full ${storagePct >= 90 ? 'bg-danger' : storagePct >= 70 ? 'bg-warning' : 'bg-success'}`}
               style={{ width: `${storagePct}%` }}
             />
           </div>
